@@ -153,6 +153,80 @@ Without per-line attribution, focus on aggregate diagnosis:
 - Use the diagnosis playbook (06-diagnosis-playbook.md) — most patterns use aggregate signals.
 - Map findings to **framework-level configuration** rather than code changes: batch size, quantization settings, attention implementation choice, context length limits.
 
+### Framework-specific action mapping
+
+Use this table to translate ncu profiling findings into framework-level configuration changes. Each row maps an observed profiling signal to the most likely fix in each framework.
+
+| ncu Finding | TensorRT-LLM | vLLM | PyTorch |
+|---|---|---|---|
+| Low tensor core utilization (`sm__pipe_tensor_cycles_active` < 20%) | Enable FP8 quantization (`--dtype fp8`); check `quantize.py` config | Set `--quantization fp8` or `awq`; verify with `--enforce-eager` off | Use `torch.compile(mode="max-autotune")`; set `dtype=torch.bfloat16` |
+| DRAM BW saturated (`dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed` > 70%) | Reduce KV-cache precision (`--kv_cache_dtype fp8`); enable paged KV cache | Tune `--block-size`; enable prefix caching (`--enable-prefix-caching`) | Reduce context length; use FlashAttention (`attn_implementation="flash_attention_2"`) |
+| Small grid / low occupancy (`launch__grid_size` < 170) | Increase `max_batch_size`; check tensor parallelism config (TP splits work across GPUs) | Increase `--max-num-seqs`; tune `--max-model-len` | Increase batch size; use `torch.compile` for kernel fusion |
+| Register spill (`launch__registers_per_thread` > 128, local memory > 0) | Report to framework team — compiled engine kernels can't be tuned | Same — Triton JIT kernels auto-tune register usage | Check `torch.compile` `fullgraph=True` mode; try `TORCH_COMPILE_MAX_REG=128` |
+| High `long_scoreboard` stalls (> 40%) | Normal for decode; reduce memory traffic via quantization or KV-cache optimization | Normal for decode; try `--quantization fp8` to halve memory reads | Normal for decode; enable `torch.backends.cuda.flash_sdp_enabled()` |
+| Warp divergence (`smsp__thread_inst_executed_pred_on_per_inst_executed.ratio` < 0.8) | Check attention masking config; variable-length inputs cause divergence in fused kernels | Check `--max-model-len` alignment; ragged batching increases divergence | Use `torch.nn.utils.rnn.pad_sequence` to avoid divergent attention masks |
+| L2 hit rate very low (`lts__t_sector_hit_rate.pct` < 20%) on repeated inference | Enable persistent L2 via `cudaCtxResetPersistingL2Cache` between requests; pin hot KV-cache lines | Not directly configurable — framework manages L2 | Use `torch.cuda.memory.CUDAPluggableAllocator` for cache-aware allocation |
+| PM sampling shows tail effect (uneven SM utilization over time) | Check `max_batch_size` alignment with TP degree; ensure grid fills all 170 SMs | Tune `--max-num-seqs` to avoid partial waves; check scheduler config | Use `torch.compile` with `dynamic=False` for consistent grid sizes |
+
+### RTX 5090 VRAM budget planning
+
+The RTX 5090 has ~31.4 GB usable VRAM. This constrains which models fit and at what precision.
+
+**Model memory estimation:**
+```
+model_bytes = num_params × bytes_per_param
+kv_cache_bytes = 2 × num_layers × num_kv_heads × head_dim × max_seq_len × batch_size × bytes_per_element
+total = model_bytes + kv_cache_bytes + activation_overhead (~10-20%)
+```
+
+**Example budgets (approximate, single-user decode):**
+
+| Model | FP16 (2B/param) | FP8 (1B/param) | INT4 (0.5B/param) | Fits in 32 GB? |
+|---|---|---|---|---|
+| LLaMA-3 8B | 16 GB + KV | 8 GB + KV | 4 GB + KV | FP16: yes (short ctx). FP8/INT4: yes |
+| LLaMA-3 13B | 26 GB + KV | 13 GB + KV | 6.5 GB + KV | FP16: barely (no KV room). FP8: yes. INT4: yes |
+| LLaMA-3 70B | 140 GB | 70 GB | 35 GB | No — even INT4 doesn't fit. Use offloading or smaller model |
+
+**KV-cache budget for a 8B model (32 layers, 8 KV heads, head_dim=128):**
+- Per token: `2 × 32 × 8 × 128 = 65,536 bytes` (FP16) = 64 KB/token
+- At 4K context: 256 MB. At 32K context: 2 GB. At 128K context: 8 GB.
+
+**When you'll OOM and what to do:**
+1. Reduce `max_seq_len` / `max_model_len` — direct KV-cache savings.
+2. Quantize KV-cache to FP8 (`--kv_cache_dtype fp8`) — halves KV memory.
+3. Lower model precision (FP16 → FP8 → INT4) — reduces model weight memory.
+4. Enable CPU offloading (`--cpu-offload-gb` in vLLM) — trades latency for capacity.
+5. Use a smaller model — often the right answer for single-GPU deployment.
+
+### Expanded kernel naming patterns
+
+Use kernel names to identify what a kernel does before profiling. This helps prioritize which kernels to investigate.
+
+| Framework | Kernel Name Pattern | Likely Operation | Notes |
+|---|---|---|---|
+| **TensorRT-LLM** | `tensorrt_llm::kernels::fmha_*` | Flash/fused multi-head attention | Multiple variants for different head sizes and sequence lengths |
+| | `cutlass::*gemm*` | GEMM (linear layers) | CUTLASS templates; precision encoded in type parameters |
+| | `tensorrt_llm::kernels::quantize*` | Quantization/dequantization | Pre/post-processing for quantized inference |
+| | `tensorrt_llm::kernels::apply_*` | Activation functions, RoPE, RMS norm | Fused elementwise kernels |
+| | `void fused_*` | Fused multi-op kernels | TRT compiler-generated fusions |
+| **vLLM** | `triton_*` + hash suffix | Triton JIT-compiled kernel | Hash changes between runs — profile a single run |
+| | `flashinfer::*` or `FlashInfer*` | FlashInfer attention | Used when FlashInfer backend is selected |
+| | `flash_fwd_*` or `flash_bwd_*` | FlashAttention | Forward/backward attention kernels |
+| | `void paged_attention_*` | Paged attention (vLLM-native) | Core decode attention implementation |
+| | `void reshape_and_cache*` | KV-cache update | Writing new KV entries into paged blocks |
+| **PyTorch** | `triton_poi_fused_*_N` | `torch.compile` fused pointwise | N is a counter; names change between compilations |
+| | `triton_red_fused_*_N` | `torch.compile` fused reduction | Same naming pattern as pointwise |
+| | `at::native::*` | Eager-mode ATen kernels | Standard PyTorch ops, not compiled |
+| | `cutlass::*` or `cublas*` | GEMM via cuBLAS/CUTLASS | PyTorch delegates to vendor BLAS |
+| | `void at_cuda_detail::cub::*` | CUB-based reductions, scans | Sort, topk, cumsum operations |
+
+**Identifying kernel type from the name:**
+- **Attention kernels:** look for `fmha`, `flash`, `attention`, `sdpa`, `mha` in the name.
+- **GEMM / linear layers:** look for `gemm`, `gemv`, `cutlass`, `cublas`, `matmul`.
+- **Elementwise / fused:** look for `fused`, `pointwise`, `poi`, `elementwise`, `apply`.
+- **Quantization:** look for `quantize`, `dequant`, `scale`, `cast`.
+- **KV-cache:** look for `cache`, `reshape_and_cache`, `paged`.
+
 ---
 
 ## Phase 3 — Collect profiles
@@ -212,7 +286,7 @@ Work through the six analysis dimensions — see [`05-analysis-dimensions.md`](0
 5. **SM utilization timeline** — flat high, flat low, periodic waves, gradual tail?
 6. **Memory access pattern** — sectors/request, L1/L2 hit rates, DRAM throughput, register spill.
 
-For each dimension, write down the observed signal *and the specific metric value* that produced it. "Kernel is memory bound" is useless; something like "`dram__bytes_read.sum.pct_of_peak_sustained_elapsed = X%` (well below peak) shows the kernel is *not* DRAM-bandwidth-bound — the `long_scoreboard` stall rate of Y% says it's latency-bound on L1" is diagnosis. Fill in X and Y from your own report.
+For each dimension, write down the observed signal *and the specific metric value* that produced it. "Kernel is memory bound" is useless; something like "`dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed = X%` (well below peak) shows the kernel is *not* DRAM-bandwidth-bound — the `long_scoreboard` stall rate of Y% says it's latency-bound on L1" is diagnosis. Fill in X and Y from your own report.
 
 Then consult [`06-diagnosis-playbook.md`](06-diagnosis-playbook.md) which maps observed patterns to likely causes and concrete fixes.
 

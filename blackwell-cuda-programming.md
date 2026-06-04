@@ -67,7 +67,7 @@ Despite both being "Blackwell" GPUs, the consumer sm_120 and data-center Blackwe
 | CTA Pair (2CTA) | Two SMs cooperate via cta_group | Not available |
 | FP4 via PTX | tcgen05 path | Not available (library-only) |
 | FP8 via PTX | Available (both paths) | mma.sync only |
-| Thread Block Clusters | Up to 16 | Available |
+| Thread Block Clusters | Up to 16 | Up to 8 (validated) |
 | Shared Memory/SM | 228 KB | 100 KB |
 | Memory | 192 GB @ 8 TB/s | 32 GB GDDR7 @ ~1.8 TB/s |
 
@@ -313,12 +313,115 @@ Caveats:
 
 | Signal | Indicates |
 |---|---|
-| `dram__bytes_read.sum.pct_of_peak_sustained_elapsed` > 70% | DRAM bandwidth-saturated — this is expected for decode |
-| `dram__bytes_read.sum.pct_of_peak_sustained_elapsed` < 30% | NOT bandwidth-saturated — investigate L2 hit rate, coalescing, or launch config |
+| `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed` > 70% | DRAM bandwidth-saturated — this is expected for decode |
+| `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed` < 30% | NOT bandwidth-saturated — investigate L2 hit rate, coalescing, or launch config |
 | `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed` < 5% | Tensor Cores nearly idle — expected for decode (GEMV doesn't generate enough work) |
 | `long_scoreboard` stalls dominant | Waiting for memory — normal for decode; reducing memory traffic (quantization) is the fix |
 | High `l2_tex_hit_rate` on weights | Weights partially cached in L2 — potential for persistent L2 optimization |
 | PM Sampling shows flat low utilization | Low parallelism (few blocks active) — consider split-K or persistent kernel approaches |
+
+### Precision-Specific Profiling Recipes
+
+When comparing kernel performance across precisions, use the same input data and grid configuration where possible. Profile each precision separately and compare the metrics below.
+
+#### Profiling BF16/FP16 Kernels
+
+**When to use:** Baseline precision for LLM inference. Use BF16 for training-compatible weights, FP16 for inference-only deployments.
+**Tensor Core pipe:** `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed`
+**RTX 5090 peak:** 209.5 TFLOPS dense (BF16), 419 TFLOPS with 2:4 sparsity.
+
+```bash
+ncu --set full \
+    --section InstructionStats --section SourceCounters \
+    -k "regex:YOUR_KERNEL" -c 1 \
+    -o $PROFILE_RUN_DIR/reports/bf16_<tag> \
+    ./your_binary [args]
+```
+
+**Key metrics:**
+- `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed` — tensor core utilization. >50% is good for compute-bound GEMM; near-zero is expected for decode GEMV.
+- `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed` — DRAM bandwidth utilization vs 1.792 TB/s peak.
+- `sm__sass_inst_executed_op_fp16.sum` + `sm__sass_inst_executed_op_bf16.sum` — confirms the kernel is actually using FP16/BF16 instructions (not FP32 fallback).
+
+#### Profiling FP8 Kernels (E4M3 / E5M2)
+
+**When to use:** Primary inference precision. E4M3 for forward pass, E5M2 for gradients (rarely used in inference). Most LLM frameworks default to E4M3 for weight quantization.
+**Tensor Core pipe:** Same `sm__pipe_tensor_cycles_active` metric — FP8 uses the same tensor pipe, at 2× throughput vs BF16.
+**RTX 5090 peak:** 419 TFLOPS dense (FP8), 838 TFLOPS with 2:4 sparsity.
+
+```bash
+ncu --set full \
+    --section InstructionStats --section SourceCounters \
+    -k "regex:YOUR_KERNEL" -c 1 \
+    -o $PROFILE_RUN_DIR/reports/fp8_<tag> \
+    ./your_binary [args --precision fp8]
+```
+
+**Key metrics:**
+- `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed` — should be roughly 2× the BF16 utilization for compute-bound kernels (same work, 2× throughput).
+- `dram__bytes_op_read.sum` — should be roughly half of BF16 (1 byte/param vs 2).
+- `sm__sass_inst_executed_op_fp8_e4m3.sum` or `sm__sass_inst_executed_op_fp8_e5m2.sum` — confirms FP8 instructions are executing (not FP16 fallback).
+
+**Caveat:** If tensor core utilization is identical to BF16, the kernel may be silently upcasting to FP16. Check the instruction mix.
+
+#### Profiling INT8 Kernels
+
+**When to use:** Weight-only quantization (W8A16) or full INT8 (W8A8). Common in production inference for latency-sensitive deployments.
+**Tensor Core pipe:** `sm__pipe_tensor_cycles_active` — INT8 uses a different sub-pipe but the same top-level metric.
+**RTX 5090 peak:** 838 TOPS (INT8), 1,676 TOPS with 2:4 sparsity.
+
+```bash
+ncu --set full \
+    --section InstructionStats --section SourceCounters \
+    -k "regex:YOUR_KERNEL" -c 1 \
+    -o $PROFILE_RUN_DIR/reports/int8_<tag> \
+    ./your_binary [args --precision int8]
+```
+
+**Key metrics:**
+- `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed` — should show improvement over BF16 for compute-bound kernels.
+- `dram__bytes_op_read.sum` — 1 byte/param (same as FP8). For W8A16, activations are still 2 bytes.
+- `sm__sass_inst_executed_op_integer.sum` — check for INT8-specific instructions.
+
+**W8A16 vs W8A8:** In W8A16, weights are INT8 but activations are FP16. The GEMM still runs in FP16 tensor mode with on-the-fly dequantization — the bandwidth win is real but the compute win is limited to dequant overhead savings.
+
+#### Profiling FP4 / NVFP4 Kernels
+
+**When to use:** Maximum throughput quantization. NVFP4 uses dual-level block scaling (per-block scale + per-tensor scale) to maintain accuracy. Available on RTX 5090 tensor cores but **library-only** — no direct PTX path on sm_120.
+**Tensor Core pipe:** Same `sm__pipe_tensor_cycles_active` metric.
+**RTX 5090 peak:** ~1,676 TOPS dense, 3,352 TOPS with 2:4 sparsity (theoretical).
+
+```bash
+ncu --set full \
+    --section InstructionStats --section SourceCounters \
+    -k "regex:YOUR_KERNEL" -c 1 \
+    -o $PROFILE_RUN_DIR/reports/fp4_<tag> \
+    ./your_binary [args --precision fp4]
+```
+
+**Key metrics:**
+- `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed` — theoretical 4× improvement over BF16 for compute-bound, though real gains depend on dequantization overhead.
+- `dram__bytes_op_read.sum` — 0.5 bytes/param plus scaling metadata. Should be roughly 4× less than BF16.
+- Instruction mix — FP4 operations run through library calls (cuBLAS/CUTLASS), not direct HMMA instructions. The instruction profile will show the library's internal kernel patterns.
+
+**Framework support:** TensorRT-LLM supports NVFP4 quantization. vLLM has partial support. Many frameworks silently fall back to FP8 — always verify with the instruction mix metrics that FP4 is actually in use.
+
+#### Cross-Precision Comparison
+
+To compare the same kernel across precisions, collect one report per precision with identical inputs and report the following side by side:
+
+| Metric | BF16 | FP8 | INT8 | FP4 |
+|---|---|---|---|---|
+| `gpu__time_duration.sum` (ns) | | | | |
+| `dram__bytes_op_read.sum` (bytes) | | | | |
+| `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed` | | | | |
+| `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed` | | | | |
+| `sm__throughput.avg.pct_of_peak_sustained_elapsed` | | | | |
+
+**What to look for:**
+- **Decode (memory-bound):** Duration should scale roughly with bandwidth savings: FP8 ≈ 2× faster, FP4 ≈ 4× faster than BF16. If not, check for dequantization overhead or launch config issues.
+- **GEMM (compute-bound):** Tensor core utilization should remain similar or increase. Duration scales with throughput: FP8 ≈ 2× faster, INT8 ≈ 4× faster than BF16.
+- **Silent fallback:** If FP8/FP4 shows identical duration to BF16, the framework likely fell back to a higher precision. Check the instruction stats section.
 
 ---
 

@@ -22,3 +22,6 @@ __pycache__/
 *.ncu-rep
 *.ncu-proj
 ncu_home/
+
+# Validation artifacts (generated during Session 4 end-to-end validation)
+profile/validation_run/

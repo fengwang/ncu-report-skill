@@ -1,8 +1,8 @@
 # RTX 5090 (sm_120) Metric Name Reference
 
-> **Validation status:** All metric names in this document are carried forward from the prior data-center Blackwell baseline. They have NOT been validated on sm_120 (RTX 5090) yet. Session 3 will validate each metric against actual ncu output on the local RTX 5090. Metric names can change between compute capability versions — always verify with `action.metric_names()`.
+> **Validation status:** Validated on RTX 5090 (sm_120) with Nsight Compute 2026.2. Session 3 confirmed 93 of 100 original metrics present; 7 DRAM metrics required an `_op_` infix rename (all corrected in this document). Metric names can change between compute capability versions — always verify with `action.metric_names()`.
 
-The stock `ncu_profile_skill.md` in older docs references metric names that may not exist on sm_120. This doc lists metric names believed to be available in Nsight Compute 2026.2 on RTX 5090, carried forward from the prior data-center Blackwell baseline. Names are flagged as unverified where applicable.
+This document lists metric names validated on the local RTX 5090 with Nsight Compute 2026.2. Names that differ from earlier compute capability versions are listed in the rename table below.
 
 If a metric returns `None` on your kernel, first check this doc, then enumerate available names:
 
@@ -14,7 +14,7 @@ action.metric_names()
 
 ## Metric names that changed
 
-| Stock skill name (older GPU) | RTX 5090 / sm_120 name (unverified) |
+| Stock skill name (older GPU) | RTX 5090 / sm_120 name (validated) |
 |---|---|
 | `smsp__inst_executed_op_global_ld.sum` | **`smsp__sass_inst_executed_op_global_ld.sum`** |
 | `smsp__inst_executed_op_global_st.sum` | **`smsp__sass_inst_executed_op_global_st.sum`** |
@@ -23,15 +23,15 @@ action.metric_names()
 | `smsp__inst_executed_op_shared_ld.sum` | **`smsp__sass_inst_executed_op_shared_ld.sum`** |
 | `smsp__inst_executed_op_shared_st.sum` | **`smsp__sass_inst_executed_op_shared_st.sum`** |
 | `l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio` | (not available directly; compute from `l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum / l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum`) |
-| `dram__bytes.sum` | (not directly; use `dram__bytes_read.sum + dram__bytes_write.sum`) |
+| `dram__bytes.sum` | (not directly; use `dram__bytes_op_read.sum + dram__bytes_op_write.sum`) |
 | `sm__inst_executed_pipe_fmaheavy.*` | *not present on Blackwell* — use `sm__inst_executed_pipe_fma.*` instead |
 | `smsp__warps_issue_stalled_<reason>_per_issue_active.pct` | **`smsp__average_warps_issue_stalled_<reason>_per_issue_active.ratio`** (note `average_` prefix and `ratio` suffix) |
 
 ---
 
-## Canonical sm_120 metric set (curated, unverified)
+## Canonical sm_120 metric set (curated, validated)
 
-These metric names were confirmed on prior data-center Blackwell with Nsight Compute 2026.1 and are carried forward to sm_120 (RTX 5090) with Nsight Compute 2026.2. **They have not been validated on the local RTX 5090 yet** — Session 3 will verify each group. Always verify for your specific ncu version by enumerating with `action.metric_names()` — NVIDIA occasionally renames metrics between compute capability versions.
+These metric names have been validated on the local RTX 5090 (sm_120) with Nsight Compute 2026.2. Session 3 confirmed 93 of 100 original metrics present (7 DRAM metrics required an `_op_` infix rename, all corrected below). 3 pcsamp stall metrics were added for completeness (103 total). Always verify for your specific ncu version by enumerating with `action.metric_names()` — NVIDIA occasionally renames metrics between compute capability versions.
 
 ### Launch geometry / occupancy
 ```
@@ -62,13 +62,13 @@ gpu__compute_memory_access_throughput.avg.pct_of_peak_sustained_elapsed
 gpu__compute_memory_request_throughput.avg.pct_of_peak_sustained_elapsed
 l1tex__throughput.avg.pct_of_peak_sustained_active
 lts__throughput.avg.pct_of_peak_sustained_elapsed
-dram__bytes_read.sum
-dram__bytes_read.sum.pct_of_peak_sustained_elapsed
-dram__bytes_read.sum.per_second                       # achieved BW
-dram__bytes_write.sum
-dram__bytes_write.sum.pct_of_peak_sustained_elapsed
-dram__sectors_read.sum
-dram__sectors_write.sum
+dram__bytes_op_read.sum
+dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed
+dram__bytes_op_read.sum.per_second                       # achieved BW
+dram__bytes_op_write.sum
+dram__bytes_op_write.sum.pct_of_peak_sustained_elapsed
+dram__sectors_op_read.sum
+dram__sectors_op_write.sum
 ```
 
 ### Timing
@@ -182,25 +182,23 @@ smsp__pcsamp_warps_issue_stalled_membar
 
 Each of these has `num_instances() > 0` with `correlation_ids()` that map to PCs. Use `action.source_info(pc)` to map PCs to `(file, line)`.
 
-### PM sampling (time series)
+### PM sampling (time series) — sm_120 hardware-counter metrics
+
+On sm_120, PM sampling provides hardware-counter timeseries rather than the per-stall-reason breakdowns available on earlier architectures. The stall-reason timeseries (`pmsampling:smsp__warps_issue_stalled_*`) do **not** exist on sm_120.
+
+**Validated on RTX 5090 with ncu 2026.2:**
 ```
-pmsampling:smsp__warps_issue_stalled_long_scoreboard.avg
-pmsampling:smsp__warps_issue_stalled_short_scoreboard.avg
-pmsampling:smsp__warps_issue_stalled_wait.avg
-pmsampling:smsp__warps_issue_stalled_dispatch_stall.avg
-pmsampling:smsp__warps_issue_stalled_branch_resolving.avg
-pmsampling:smsp__warps_issue_stalled_math_pipe_throttle.avg
-pmsampling:smsp__warps_issue_stalled_mio_throttle.avg
-pmsampling:smsp__warps_issue_stalled_lg_throttle.avg
-pmsampling:smsp__warps_issue_stalled_no_instruction.avg
-pmsampling:smsp__warps_issue_stalled_drain.avg
-pmsampling:smsp__warps_issue_stalled_sleeping.avg
-pmsampling:smsp__warps_issue_stalled_misc.avg
-pmsampling:smsp__warps_issue_stalled_barrier.avg
-pmsampling:smsp__warps_issue_stalled_tex_throttle.avg
+pmsampling:smsp__warps_active.sum
+pmsampling:dram__bytes.avg.pct_of_peak_sustained_elapsed
+pmsampling:dram__bytes.sum.per_second
+pmsampling:l1tex__data_pipe_lsu_wavefronts.avg.pct_of_peak_sustained_elapsed
+pmsampling:sm__inst_executed_pipe_alu_size_64b_realtime.avg.pct_of_peak_sustained_elapsed
+pmsampling:sm__pipe_fma_cycles_active_realtime.avg.pct_of_peak_sustained_elapsed
+pmsampling:pcie__throughput.avg.pct_of_peak_sustained_elapsed
+pmsampling:gpc__cycles_elapsed.avg.per_second
 ```
 
-Note: some `pmsampling:` metrics (notably `pmsampling:sm__throughput.*` and `pmsampling:dram__throughput.*`) may return empty instance arrays depending on ncu version / driver / GPU pair — always check `m.num_instances() > 0` before using. When SM/DRAM timelines are empty, the stall-reason timelines (`pmsampling:smsp__warps_issue_stalled_*`) usually tell the same story and are more reliably populated.
+Note: some `pmsampling:` metrics may return empty instance arrays depending on ncu version / driver / GPU pair — always check `m.num_instances() > 0` before using.
 
 ---
 

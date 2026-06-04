@@ -227,10 +227,10 @@ pmsampling:smsp__warps_issue_stalled_short_scoreboard.avg
 **Metrics:**
 ```
 # DRAM
-dram__bytes_read.sum
-dram__bytes_read.sum.pct_of_peak_sustained_elapsed
-dram__bytes_write.sum.pct_of_peak_sustained_elapsed
-dram__bytes_read.sum.per_second                    # achieved BW
+dram__bytes_op_read.sum
+dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed
+dram__bytes_op_write.sum.pct_of_peak_sustained_elapsed
+dram__bytes_op_read.sum.per_second                    # achieved BW
 
 # L1 / L2 hit rates
 l1tex__t_sector_hit_rate.pct
@@ -258,7 +258,7 @@ smsp__sass_inst_executed_op_shared.sum                     # 0 if no shared memo
 
 **Reading:**
 
-- **`dram__bytes_read.sum.pct_of_peak_sustained_elapsed` ≈ 80-100%**: genuinely DRAM-bandwidth-bound. Reduce bytes / amortize reads with shared memory.
+- **`dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed` ≈ 80-100%**: genuinely DRAM-bandwidth-bound. Reduce bytes / amortize reads with shared memory.
 - **`... << 10%` but kernel is slow**: *not* bandwidth-bound. It's latency-bound (Dimension 3) or compute-bound (check `sm__throughput`).
 - **`l1tex__t_sector_hit_rate.pct > 90%`**: good data locality, L1 is absorbing the reuse.
 - **`lts__t_sector_hit_rate.pct < 50%`**: L2 is being blown through, reads fall to DRAM.

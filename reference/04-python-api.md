@@ -41,7 +41,7 @@ def safe(action, name, default=None):
         return default
 
 sm_util = safe(action, "sm__throughput.avg.pct_of_peak_sustained_elapsed")
-dram_read_bw = safe(action, "dram__bytes_read.sum.per_second")
+dram_read_bw = safe(action, "dram__bytes_op_read.sum.per_second")
 duration_ns = safe(action, "gpu__time_duration.sum")     # usually in ns
 
 print(f"SM throughput: {sm_util}%")
@@ -74,7 +74,7 @@ This is how you discover the *actual* metric names available on your GPU instead
 Many metrics have multiple values per collection. `value()` returns the aggregate (sum / avg depending on `rollup_operation`), but you can also enumerate the individual samples.
 
 ```python
-m = action["pmsampling:smsp__warps_issue_stalled_long_scoreboard.avg"]
+m = action["pmsampling:smsp__warps_active.sum"]  # sm_120 hardware-counter timeseries
 n = m.num_instances()              # e.g., 1660 for a PM-sampled metric
 print(f"instances: {n}")
 
@@ -218,7 +218,7 @@ def compare(rep1_path, rep2_path, metrics):
 compare("v1.ncu-rep", "v2.ncu-rep", [
     "gpu__time_duration.sum",
     "sm__throughput.avg.pct_of_peak_sustained_elapsed",
-    "dram__bytes_read.sum.pct_of_peak_sustained_elapsed",
+    "dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed",
     "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio",
     "l1tex__t_sector_hit_rate.pct",
 ])

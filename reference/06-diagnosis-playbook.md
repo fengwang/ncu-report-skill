@@ -127,7 +127,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 **Signals:**
 - `smsp__pcsamp_warps_issue_stalled_long_scoreboard / smsp__pcsamp_sample_count > 0.40`.
 - `smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio > 3`.
-- `dram__bytes_read.sum.pct_of_peak_sustained_elapsed < 10%` (→ not DRAM-bandwidth-bound).
+- `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed < 10%` (→ not DRAM-bandwidth-bound).
 - Hotspot lines are global loads (check `stall_hotspots_<tag>.txt`).
 
 **Why:** warps issue a load, then stall waiting for it to return before the next dependent op. Usually combined with low occupancy or insufficient ILP.
@@ -328,7 +328,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 ## Pattern O — Decode bandwidth ceiling (LLM-specific)
 
 **Signals:**
-- `dram__bytes_read.sum.pct_of_peak_sustained_elapsed > 80%`.
+- `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed > 80%`.
 - `launch__grid_size` is small (batch=1, single-token decode → few thread blocks).
 - `sm__throughput.avg.pct_of_peak_sustained_elapsed` is low (DRAM is the bottleneck, not compute).
 - Kernel is identified as a decode-phase operation (attention or GEMV with batch=1).
@@ -359,7 +359,7 @@ For a 7B FP16 model: ~14 GB of weights must be read per token. At 1.8 TB/s, that
 
 **Signals:**
 - `lts__t_sector_hit_rate.pct` < 50% during attention kernels.
-- `dram__bytes_read.sum` is significantly larger than expected from weight reads alone — the excess is KV-cache reload from DRAM.
+- `dram__bytes_op_read.sum` is significantly larger than expected from weight reads alone — the excess is KV-cache reload from DRAM.
 - Estimated KV-cache size exceeds 96 MB (RTX 5090 L2 capacity).
 
 **KV-cache size estimation:**
@@ -424,6 +424,114 @@ Using FP16 when FP8 is viable means 2× less compute throughput and no bandwidth
 - Already using the lowest viable precision — no room to quantize further.
 
 **Cross-ref:** See `blackwell-cuda-programming.md` § Quantization Impact on Decode.
+
+---
+
+## Single-User Decode Optimization Checklist (RTX 5090)
+
+A step-by-step checklist for optimizing single-token autoregressive decode kernels on RTX 5090. Work through all three phases in order. Each step specifies the ncu metric to check, the RTX 5090-calibrated threshold, and what to do if the check fails.
+
+**Prerequisites:** An ncu report collected with `--set full --section PmSampling` on the decode kernel of interest.
+
+### Phase 1 — Characterize the Bottleneck
+
+#### Step 1: Confirm this is a decode kernel
+- **Metric:** `launch__grid_size`
+- **Threshold:** Grid size is small (typically < 170 blocks for batch=1 single-token decode).
+- **If FAIL (large grid):** This is likely a prefill or batched kernel, not decode. The checklist still applies but bandwidth saturation is less likely — the kernel may be compute-bound.
+- **If PASS:** Proceed.
+
+#### Step 2: Measure DRAM bandwidth utilization
+- **Metric:** `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed`
+- **Threshold:** > 60% means bandwidth-saturated (normal for decode on RTX 5090 at ~1.8 TB/s). < 30% means NOT bandwidth-bound.
+- **If > 60%:** Kernel is bandwidth-bound (see Pattern O). Go to Steps 6–8 (reduce bytes moved).
+- **If < 30%:** Kernel is latency-bound or underutilized. Go to Steps 9–11.
+- **If 30–60%:** Mixed regime. Check Steps 3–5 to narrow down.
+
+#### Step 3: Check tensor core utilization
+- **Metric:** `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed`
+- **Threshold:** For decode GEMV (batch=1), expect < 5%. For small-batch GEMM, expect 10–50%.
+- **If near-zero:** Expected for decode — tensor cores can't fill on tiny matrices. Not actionable.
+- **If > 20%:** Kernel has meaningful compute component. Check if it's a batched or prefill kernel misidentified as decode.
+
+#### Step 4: Identify dominant stall reason
+- **Metric:** `smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio`
+- **Threshold:** > 3.0 means memory latency dominates.
+- **If > 3.0:** Memory-latency-bound. The kernel is waiting for data from DRAM or L2. Reducing traffic (Steps 6–8) or hiding latency (Steps 9–10) will help.
+- **If < 1.0:** Check other stall reasons — `math_pipe_throttle` (compute-bound), `barrier` (sync overhead, see Pattern I), `dispatch_stall` (launch config issue).
+
+#### Step 5: Check L2 hit rate
+- **Metric:** `lts__t_sector_hit_rate.pct`
+- **Threshold:** > 60% means significant L2 caching (weights or KV-cache partially fit). < 30% means most data streams from DRAM.
+- **If high hit rate on weights:** Persistent L2 optimization viable (Step 11). Model weights partially fit in 96 MB L2.
+- **If low hit rate:** Data is too large for L2. Focus on reducing DRAM traffic.
+
+### Phase 2 — Optimize
+
+#### Step 6: Evaluate quantization opportunity
+- **Metric:** Compare `dram__bytes_op_read.sum` across precisions (see `blackwell-cuda-programming.md` § Precision-Specific Profiling Recipes).
+- **Threshold:** FP16 → FP8 should halve bytes read. FP8 → FP4 should halve again.
+- **If bandwidth-saturated (Step 2 > 60%):** Quantization is the highest-leverage fix. FP8 gives ~2× decode speedup; FP4 gives ~4× (theoretical). See Pattern Q for mismatch diagnosis.
+- **If NOT bandwidth-saturated:** Quantization helps bandwidth but won't fix the primary bottleneck.
+
+#### Step 7: Check memory coalescing quality
+- **Metric:** `l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum / l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum` (sectors per request)
+- **Threshold:** Ideal = 4 (32 threads × 4 bytes / 128-byte cache line). Values > 8 indicate poor coalescing.
+- **If > 8:** Uncoalesced access pattern — see Pattern C. Common in KV-cache access with non-contiguous layouts.
+- **If ≤ 4:** Coalescing is good. Not the bottleneck.
+
+#### Step 8: Diagnose KV-cache access pattern
+- **Metrics:** `dram__bytes_op_read.sum` vs expected weight-only traffic. `lts__t_sector_hit_rate.pct` during attention kernels.
+- **Threshold:** If DRAM reads significantly exceed model weight reads, the excess is KV-cache reload. See Pattern P for detailed diagnosis.
+- **If KV-cache thrashing:** Reduce context length, quantize KV-cache to FP8, or evaluate persistent L2 (Step 11).
+- **If KV-cache fits in L2:** Not the bottleneck.
+
+#### Step 9: Check occupancy vs theoretical
+- **Metric:** `sm__warps_active.avg.pct_of_peak_sustained_active`
+- **Threshold:** Theoretical max = 48 warps/SM on RTX 5090. Achieved < 25% of theoretical suggests room for improvement.
+- **If low occupancy:** Check register pressure (Step 10), shared memory usage, or block size. See Pattern J.
+- **If occupancy is reasonable (> 50% of theoretical):** Occupancy is not the bottleneck.
+
+#### Step 10: Check for register spill
+- **Metric:** `launch__registers_per_thread` and `lmem__size_per_thread`
+- **Threshold:** > 128 registers/thread limits occupancy to ≤ 4 blocks/SM. Any local memory (lmem > 0) indicates spill.
+- **If spilling:** Reduce register pressure — simplify the kernel, split into phases, use `__launch_bounds__`. See Pattern K.
+- **If no spill:** Register pressure is not the bottleneck.
+
+#### Step 11: Evaluate persistent L2 for KV-cache
+- **Metric:** `lts__t_sector_hit_rate.pct` before and after enabling persistent L2.
+- **Threshold:** RTX 5090 supports up to 60 MB persistent L2 (`cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, ...)`).
+- **If KV-cache ≤ 60 MB:** Pin the KV-cache in L2 using `cudaStreamSetAttribute` with `cudaStreamAttributeAccessPolicyWindow`. Expect L2 hit rate improvement.
+- **If KV-cache > 60 MB:** Only the hot portion fits. Pin the most recent tokens' KV entries.
+
+#### Step 12: Check attention implementation
+- **Metric:** Compare kernel duration against a known-good FlashAttention/FlashInfer baseline.
+- **Threshold:** Non-fused attention (materializing the full attention matrix) uses O(seq_len²) memory. Fused attention uses O(seq_len).
+- **If using non-fused attention:** Switch to FlashAttention or FlashInfer. This is usually the single largest optimization available.
+- **If already fused:** Check if the implementation is optimal for the head size and sequence length.
+
+#### Step 13: Check warp divergence in attention masking
+- **Metric:** `smsp__thread_inst_executed_pred_on_per_inst_executed.ratio`
+- **Threshold:** < 0.7 indicates significant warp divergence.
+- **If divergent:** Common in causal masking with variable-length inputs. Padding to warp-aligned boundaries reduces divergence. See Pattern N.
+- **If not divergent:** Not the bottleneck.
+
+### Phase 3 — Verify Improvement
+
+#### Step 14: Re-profile after changes
+- Collect a new ncu report with the same `--set full --section PmSampling` flags.
+- Compare `gpu__time_duration.sum` (kernel latency) and `dram__bytes_op_read.sum` (bytes moved) against the baseline.
+- A valid improvement shows: lower duration AND lower bytes read (for quantization) or higher bandwidth utilization (for coalescing fixes).
+
+#### Step 15: Check for regressions
+- Verify other kernels in the pipeline haven't slowed down (quantization changes affect all layers).
+- Check numerical accuracy if precision was reduced — run a reference comparison on model outputs.
+- Monitor `gpu__time_duration.sum` across all kernels, not just the one you optimized.
+
+#### Step 16: Document findings
+- Record the optimization in the report template format (`reference/07-report-template.md`).
+- Include: original metric values, changes made, new metric values, measured speedup.
+- Note any trade-offs (accuracy loss, increased code complexity, framework version requirements).
 
 ---
 

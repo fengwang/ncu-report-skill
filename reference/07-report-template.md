@@ -65,7 +65,7 @@ Minimal runnable command listing:
 | **Duration** | X µs | Y µs | `gpu__time_duration.sum` |
 | SM throughput (% peak) | X% | Y% | `sm__throughput.avg.pct_of_peak_sustained_elapsed` |
 | Memory throughput (% peak) | X% | Y% | `gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed` |
-| DRAM throughput (% peak) | X% | Y% | `dram__bytes_read.sum.pct_of_peak_sustained_elapsed` |
+| DRAM throughput (% peak) | X% | Y% | `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed` |
 | L1 hit rate | X% | Y% | `l1tex__t_sector_hit_rate.pct` |
 | L2 hit rate | X% | Y% | `lts__t_sector_hit_rate.pct` |
 | Tensor Core usage | X% | Y% | `sm__pipe_tensor_cycles_active.*` |

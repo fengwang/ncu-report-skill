@@ -108,7 +108,7 @@ If you already know which metrics you want (e.g., you're re-running after a code
 ncu --metrics \
     sm__throughput.avg.pct_of_peak_sustained_elapsed,\
     sm__warps_active.avg.pct_of_peak_sustained_active,\
-    dram__bytes_read.sum.pct_of_peak_sustained_elapsed,\
+    dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed,\
     l1tex__t_sector_hit_rate.pct,\
     gpu__time_duration.sum,\
     l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,\

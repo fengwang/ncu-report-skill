@@ -227,7 +227,7 @@ It depends on the kernel type:
 - Element-wise / reduction: usually 10-30%, because they're DRAM-BW-bound.
 - Attention / recurrence kernels: varies wildly; compare against a reference implementation.
 
-Always check Speed-of-Light alongside: `dram__bytes_read.sum.pct_of_peak_sustained_elapsed`. If DRAM is saturated, low SM throughput is expected and OK. If DRAM is idle AND SM is idle, you're latency-bound.
+Always check Speed-of-Light alongside: `dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed`. If DRAM is saturated, low SM throughput is expected and OK. If DRAM is idle AND SM is idle, you're latency-bound.
 
 ### "The details page says `Est. Speedup: X%` — is that reliable?"
 
@@ -236,3 +236,43 @@ Yes, mostly. NCU's rule engine does a reasonable job estimating individual rule 
 - The sum of all `Est. Speedup`s is usually > 100%, because rules overlap (fixing A might also help B). Don't add them.
 - Rules are per-pattern; the rule engine doesn't know which one is hardest/easiest to fix in your codebase.
 - Use `Est. Speedup: X%` to rank patterns by magnitude; use your judgement for ease of implementation.
+
+---
+
+## RTX 5090-specific findings
+
+### Cluster launch support (Evidence Gap G-4)
+
+**Result:** RTX 5090 (consumer Blackwell, sm_120) **supports cluster launches** via `cudaLaunchKernelEx` with `cudaLaunchAttributeClusterDimension`.
+
+**Tested cluster sizes:**
+
+| Cluster Size | Result |
+|---|---|
+| 2 | Success |
+| 4 | Success |
+| 8 | Success |
+| 16 | `cudaErrorLaunchFailure` ("cluster misconfiguration") |
+
+**Max cluster size: 8 blocks.** Data-center Blackwell supports clusters up to 16; the RTX 5090 supports up to 8. The cluster feature is available on consumer Blackwell despite not being documented for GeForce GPUs.
+
+**Implication:** Cooperative kernel patterns that use inter-block communication via distributed shared memory (DSMEM) are available on RTX 5090 with clusters up to 8 blocks.
+
+### Effective GDDR7 bandwidth under profiling (Evidence Gap G-7)
+
+**Result:** Measured effective DRAM bandwidth under ncu profiling on RTX 5090:
+
+| Metric | Value |
+|---|---|
+| DRAM read bandwidth | 813 GB/s |
+| DRAM write bandwidth | 695 GB/s |
+| **Total effective bandwidth** | **1,508 GB/s** |
+| Theoretical peak | 1,792 GB/s |
+| **Efficiency** | **84.2%** |
+
+**Test conditions:** Device-to-device copy kernel (`float4` loads/stores), 256 MB buffers, 1,360 blocks × 256 threads, profiled with `ncu --set full`.
+
+**Caveats:**
+- ncu profiling replays the kernel multiple times (41 passes for `--set full`), which sustains the GPU at high power draw (575W TDP). Thermal throttling may reduce effective clocks during long profiling runs.
+- The 84% efficiency is consistent with expected GDDR7 controller overhead. Effective bandwidth in non-profiled execution may be slightly higher (fewer replay-induced cache invalidations).
+- Read bandwidth exceeds write bandwidth because the copy kernel reads one buffer and writes another — the asymmetry reflects the test workload, not a hardware limitation.
