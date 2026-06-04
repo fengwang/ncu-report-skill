@@ -1,0 +1,99 @@
+session_contract:
+  id: session-3
+  objective: >
+    Update all Python helper scripts and the CUDA harness template for RTX 5090
+    (sm_120). Validate the curated metric list against actual ncu output on the
+    local RTX 5090. Resolve evidence map gaps G-1, G-2, G-5, G-6, G-8.
+  risk_level: high
+  routing: worker_plus_reviewers
+  in_scope:
+    - helpers/ncu_utils.py metric list rename and validation
+    - helpers/analyze_reports.py metric names and throughput constants
+    - helpers/extract_stall_hotspots.py stall metric name verification
+    - helpers/plot_timeline.py PM sampling metric verification
+    - helpers/harness_template.cu compile target and launch config
+    - Full metric validation procedure (collect ncu report, extract metric_names(), diff)
+    - Gap G-1 resolution (max shared memory per block via cudaFuncSetAttribute)
+    - Gap G-2 resolution (sm_120 metric name compatibility)
+    - Gap G-5 resolution (TMEM metric availability)
+    - Gap G-6 resolution (ncu_report Python module import path)
+    - Gap G-8 resolution (shared memory carveout options)
+  out_of_scope:
+    - SKILL.md, blackwell-cuda-programming.md, README.md (Session 1)
+    - reference/ documents (Session 2)
+    - helpers/safetensors_loader.h (GPU-independent)
+    - helpers/list_flashinfer_workloads.py (no GPU-specific logic)
+    - End-to-end workflow validation (Session 4)
+    - LLM content additions (Session 4)
+  blast_radius:
+    allowed_files:
+      - helpers/ncu_utils.py
+      - helpers/analyze_reports.py
+      - helpers/extract_stall_hotspots.py
+      - helpers/plot_timeline.py
+      - helpers/harness_template.cu
+    forbidden_files:
+      - SKILL.md
+      - blackwell-cuda-programming.md
+      - README.md
+      - reference/*
+      - helpers/safetensors_loader.h
+      - helpers/list_flashinfer_workloads.py
+  invariants:
+    - Helper scripts depend only on Python stdlib + ncu_report module
+    - ncu_utils.py exports: load_report(), load_action(), safe(), per_pc_values(), pc_to_source_line(), rule_speedups()
+    - analyze_reports.py accepts .ncu-rep file path as argument
+    - extract_stall_hotspots.py accepts .ncu-rep file path as argument
+    - plot_timeline.py accepts .ncu-rep file path as argument
+    - harness_template.cu compiles with nvcc -arch=sm_120 -lineinfo
+  acceptance_criteria:
+    - "grep -ri 'B200\\|b200' helpers/ returns empty"
+    - B200_KEY_METRICS renamed (no variable with B200 prefix in ncu_utils.py)
+    - Metric list contains only names present in action.metric_names() output from local 5090 (or explicitly flagged as unverified)
+    - "nvcc -arch=sm_120 -lineinfo helpers/harness_template.cu -o /tmp/test_harness succeeds"
+    - analyze_reports.py bandwidth constant is ~1.792 TB/s (not 8 TB/s)
+    - ncu_report module imports successfully from documented path
+    - Gap G-1 resolved — max dynamic shared memory per block documented
+    - Gap G-2 resolved — metric diff (added/removed/renamed) documented
+    - Gap G-5 resolved — TMEM metric availability documented
+    - Gap G-6 resolved — ncu_report import path verified
+    - Gap G-8 resolved — shared memory carveout options documented
+  deterministic_checks:
+    - "grep -c 'B200_KEY_METRICS' helpers/ncu_utils.py # must be 0"
+    - "grep -rci 'B200\\|b200\\|sm_100\\|sm100' helpers/ | grep -v ':0$' # must be empty"
+    - "nvcc -arch=sm_120 -lineinfo helpers/harness_template.cu -o /tmp/harness_test 2>&1; echo $? # must be 0"
+    - "python3 -c 'import sys; sys.path.insert(0, \"<verified_path>\"); import ncu_report; print(\"OK\")' # must print OK"
+    - "grep -c '1792\\|1.792\\|1.8' helpers/analyze_reports.py # must be >= 1"
+  review_axes:
+    - correctness
+    - tests
+    - performance
+  adversarial_cases:
+    - Metric list updated to remove B200 prefix but actual names not validated against GPU
+    - Stall metric names assumed same as sm_100 without checking
+    - Bandwidth constant updated but throughput peak constants (TFLOPS) not updated
+    - Harness template compiles but default block size is suboptimal for sm_120 occupancy
+    - ncu_report path hardcoded instead of dynamically discovered
+    - analyze_reports.py produces NaN or zero for efficiency percentages due to wrong peak values
+  failure_modes_to_watch:
+    - ncu profiling requires sudo — blocks the metric validation procedure
+    - ncu_report Python module version incompatible with ncu 2026.2 report format
+    - Metric names silently resolve to zero instead of raising errors (masking missing metrics)
+    - Stall reason names changed subtly (e.g., different suffix convention)
+  done_condition: >
+    All deterministic checks pass. Metric list validated with >=80% of names
+    confirmed present on sm_120. Harness compiles and runs. All five evidence
+    map gaps resolved with documented findings. Bandwidth and throughput
+    constants updated for RTX 5090.
+  handoff_requirements:
+    - Documented metric diff (sm_100 vs sm_120) available for Session 4 reference
+    - All gap resolutions documented (can be inline code comments or a summary)
+    - Harness binary runs on local 5090 (confirmed by Session 3 executor)
+    - ncu_report import path verified and documented
+    - Any metrics that could not be validated are flagged in ncu_utils.py with comments
+  eval_seed_candidates:
+    - Compile harness_template.cu with -arch=sm_120 and verify exit code 0
+    - Import ncu_report from verified path
+    - Check that bandwidth constant in analyze_reports.py is ~1792 GB/s
+    - Check that B200_KEY_METRICS variable name is gone from ncu_utils.py
+    - Run analyze_reports.py against a real ncu report and check for no metric errors

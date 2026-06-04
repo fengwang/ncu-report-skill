@@ -1,0 +1,92 @@
+session_contract:
+  id: session-2
+  objective: >
+    Update all 10 reference documents in reference/ for RTX 5090 (sm_120).
+    Recalibrate the six-dimension analysis framework and diagnosis playbook
+    thresholds for 170 SMs, ~1.8 TB/s bandwidth, 100 KB shared/SM, 48 warps/SM.
+    Add 3 LLM-specific diagnosis patterns. Rename metric names reference file.
+  risk_level: medium
+  routing: worker_plus_reviewers
+  in_scope:
+    - All 10 files in reference/ directory
+    - Threshold recalibration for all 8 existing diagnosis patterns
+    - 3 new LLM diagnosis patterns (decode bandwidth, KV-cache thrashing, quantization mismatch)
+    - Rename reference/08-b200-metric-names.md → reference/08-rtx5090-metric-names.md
+    - Framework kernel profiling guidance in workflow document
+  out_of_scope:
+    - Helper Python scripts (Session 3)
+    - SKILL.md or blackwell-cuda-programming.md (Session 1)
+    - Actual metric name validation on GPU (Session 3)
+    - End-to-end profiling (Session 4)
+  blast_radius:
+    allowed_files:
+      - reference/00-directory-layout.md
+      - reference/01-workflow.md
+      - reference/02-harness-guide.md
+      - reference/03-collection.md
+      - reference/04-python-api.md
+      - reference/05-analysis-dimensions.md
+      - reference/06-diagnosis-playbook.md
+      - reference/07-report-template.md
+      - reference/08-b200-metric-names.md
+      - reference/08-rtx5090-metric-names.md
+      - reference/09-common-issues.md
+    forbidden_files:
+      - SKILL.md
+      - blackwell-cuda-programming.md
+      - README.md
+      - helpers/*
+  invariants:
+    - Six-dimension analysis framework preserved (occupancy, tail, stalls, tensor, timeline, memory)
+    - Diagnosis playbook pattern→cause→fix structure preserved
+    - 6-phase workflow structure preserved
+    - Report template structure preserved
+    - No pip dependencies
+  acceptance_criteria:
+    - "grep -ri 'sm_100\\|B200' reference/ returns empty"
+    - All occupancy limits in 05-analysis-dimensions.md match RTX 5090 (48 warps, 24 blocks, 100 KB shared)
+    - Pattern A threshold in 06-diagnosis-playbook.md references 170 blocks (not 148)
+    - Bandwidth references in all files are ~1.8 TB/s (not 8 TB/s)
+    - LLM patterns I, J, K exist in 06-diagnosis-playbook.md with signal/cause/fix
+    - File reference/08-rtx5090-metric-names.md exists
+    - File reference/08-b200-metric-names.md does not exist
+    - Framework profiling guidance exists in 01-workflow.md
+  deterministic_checks:
+    - "grep -rci 'sm_100\\|B200\\|b200' reference/ | grep -v ':0$' # must be empty"
+    - "grep -c '170' reference/06-diagnosis-playbook.md # SM count in pattern A"
+    - "grep -c '48 warps\\|48 warp' reference/05-analysis-dimensions.md # warp limit"
+    - "grep -c '24 blocks\\|24 block' reference/05-analysis-dimensions.md # block limit"
+    - "test -f reference/08-rtx5090-metric-names.md # renamed file exists"
+    - "test ! -f reference/08-b200-metric-names.md # old file removed"
+    - "grep -c 'Pattern I\\|Pattern J\\|Pattern K' reference/06-diagnosis-playbook.md # >= 3"
+  review_axes:
+    - correctness
+    - architecture
+    - performance
+  adversarial_cases:
+    - A diagnosis threshold still references B200 SM count (148) or bandwidth (8 TB/s)
+    - LLM patterns are too generic (not RTX 5090-specific, could apply to any GPU)
+    - Metric name reference file renamed but content still says B200/sm_100
+    - Occupancy examples use 64 warps/SM or 32 blocks/SM (B200 limits)
+    - Collection recipes use flags or sections not available on sm_120
+    - Framework profiling guidance assumes source code is available
+  failure_modes_to_watch:
+    - Incomplete threshold sweep (updating pattern A but forgetting pattern E's bandwidth reference)
+    - Metric names flagged as "unverified on sm_120" but still used in examples without caveat
+    - New LLM patterns lack concrete ncu metric signals (too hand-wavy)
+    - Report template references B200 performance figures in examples
+  done_condition: >
+    All deterministic checks pass. All 10 reference files updated.
+    Metric names file renamed. Three LLM diagnosis patterns added with
+    concrete signal/cause/fix structure referencing ncu metrics.
+  handoff_requirements:
+    - All reference docs self-consistent and referencing RTX 5090 specs
+    - Metric name reference flags carried-forward names as unverified
+    - LLM patterns reference specific ncu metrics (not just prose descriptions)
+    - Session 3 can proceed to validate metric names against the updated reference
+  eval_seed_candidates:
+    - Check pattern A threshold is grid < 170 (not grid < 148)
+    - Check analysis dimensions uses 48 warps/SM, 24 blocks/SM, 100 KB shared/SM
+    - Check LLM pattern I mentions DRAM bandwidth and ~1.8 TB/s
+    - Check collection recipes use sm_120 compile target
+    - Check old metric file is gone and new one exists

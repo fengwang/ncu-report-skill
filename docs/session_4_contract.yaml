@@ -1,0 +1,97 @@
+session_contract:
+  id: session-4
+  objective: >
+    Complete LLM inference content. Run the full end-to-end profiling workflow
+    on the local RTX 5090 to validate the adapted skill. Fix any issues found.
+    Resolve evidence map gaps G-4 and G-7. Perform cross-file consistency check.
+  risk_level: high
+  routing: worker_plus_reviewers
+  in_scope:
+    - LLM content finalization (precision profiling recipes, framework profiling walkthrough, decode optimization checklist)
+    - End-to-end workflow validation (all 6 phases on local RTX 5090)
+    - Fix-forward for any bugs found during validation
+    - Gap G-4 resolution (cluster launch support on RTX 5090)
+    - Gap G-7 resolution (effective GDDR7 bandwidth under profiling)
+    - Cross-file B200/sm_100 sweep across entire repository
+    - Cross-file consistency check (hardware numbers, metric names, thresholds)
+  out_of_scope:
+    - Profiling actual LLM frameworks (TensorRT-LLM, vLLM) — validation uses a test kernel
+    - Performance optimization of helper scripts
+    - Publishing or releasing the skill
+    - Committing profile/validation_run/ artifacts to git
+  blast_radius:
+    allowed_files:
+      - blackwell-cuda-programming.md
+      - reference/01-workflow.md
+      - reference/06-diagnosis-playbook.md
+      - helpers/ncu_utils.py
+      - helpers/analyze_reports.py
+      - helpers/extract_stall_hotspots.py
+      - helpers/plot_timeline.py
+      - helpers/harness_template.cu
+      - reference/05-analysis-dimensions.md
+      - reference/09-common-issues.md
+      - .gitignore
+    forbidden_files:
+      - docs/*
+  invariants:
+    - No new top-level files unless justified
+    - Helper scripts still depend only on Python stdlib + ncu_report
+    - Six-dimension analysis framework structure preserved
+    - Diagnosis playbook pattern→cause→fix structure preserved
+    - profile/validation_run/ is added to .gitignore, not committed
+  acceptance_criteria:
+    - End-to-end workflow (harness → compile → collect → parse → diagnose → report) completes on local RTX 5090
+    - analyze_reports.py produces output with no metric-not-found errors
+    - extract_stall_hotspots.py produces per-line stall ranking
+    - plot_timeline.py produces ASCII timeline
+    - "grep -ri 'B200\\|sm_100\\|sm100' --include='*.md' --include='*.py' --include='*.cu' --include='*.h' --exclude-dir=docs . returns empty"
+    - LLM decode optimization checklist exists in diagnosis playbook
+    - Precision profiling recipes exist in programming guide for FP4, FP8, INT8, BF16
+    - Framework profiling walkthrough exists in workflow doc
+    - Validation report generated at profile/validation_run/REPORT.md
+    - Gap G-4 resolved (cluster support documented)
+    - Gap G-7 resolved (effective bandwidth measured)
+  deterministic_checks:
+    - "grep -rci 'B200\\|b200\\|sm_100\\|sm100' --include='*.md' --include='*.py' --include='*.cu' --include='*.h' --exclude-dir=docs . | grep -v ':0$' # must be empty"
+    - "test -f profile/validation_run/REPORT.md # validation report exists"
+    - "grep -c 'profile/validation_run' .gitignore # must be >= 1"
+    - "grep -c 'FP4\\|FP8\\|INT8\\|BF16' blackwell-cuda-programming.md # all four precisions mentioned"
+    - "grep -c 'decode.*checklist\\|checklist.*decode\\|Decode Optimization' reference/06-diagnosis-playbook.md # checklist exists"
+  review_axes:
+    - correctness
+    - security
+    - tests
+    - architecture
+    - performance
+  adversarial_cases:
+    - Validation passes but only because the test kernel avoids the broken metric paths
+    - LLM content is generic (applies to any GPU, not RTX 5090-specific)
+    - Cross-file check misses a B200 reference in a comment or string literal
+    - Effective bandwidth measurement distorted by thermal throttling, reported without caveat
+    - Validation report follows template structure but contains placeholder content
+    - Framework profiling walkthrough assumes source code availability
+    - Precision recipes lack concrete ncu commands for each precision format
+  failure_modes_to_watch:
+    - ncu permission denied during report collection
+    - Python helpers crash on unexpected metric format from sm_120 ncu output
+    - PM sampling data not collected (section not available on sm_120)
+    - Validation report generated but diagnosis is wrong (e.g., claims compute-bound when actually memory-bound)
+    - Clock throttling makes bandwidth measurement unreliable
+  done_condition: >
+    All acceptance criteria pass. All deterministic checks pass. End-to-end
+    workflow validated on real hardware. Zero B200/sm_100 references outside
+    docs/. LLM content complete with precision recipes and decode checklist.
+    All 8 evidence map gaps resolved. Project-level acceptance criteria
+    (docs/project_contract.md §4) pass.
+  handoff_requirements:
+    - The skill is ready for use on RTX 5090
+    - All evidence map gaps resolved and documented
+    - Validation artifacts in profile/validation_run/ (gitignored, not committed)
+    - Any remaining limitations documented in reference/09-common-issues.md
+  eval_seed_candidates:
+    - Run the full validation procedure and verify all 6 phases complete
+    - grep for B200/sm_100 across entire repo (excluding docs/)
+    - Verify LLM content references RTX 5090 32 GB VRAM and ~1.8 TB/s bandwidth
+    - Verify precision recipes include ncu collection commands per format
+    - Check validation REPORT.md has evidence-backed findings, not placeholders
