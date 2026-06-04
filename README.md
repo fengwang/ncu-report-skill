@@ -1,11 +1,4 @@
-# ncu-report-skill
-> [!IMPORTANT]
-> This skill is maintained as a standalone submodule of
-> [Kernel Design Agents (KDA)](https://github.com/mit-han-lab/kernel-design-agents)
-> for easy installation.
->
-> For bug reports, feature requests, and discussions, please use the main KDA repository:
-> https://github.com/mit-han-lab/kernel-design-agents
+# ncu-report-skill for RTX 5090 profiling with Nsight Compute
 
 A Claude Code skill for profiling CUDA kernels with Nsight Compute on NVIDIA GeForce RTX 5090 (sm_120). Covers the full workflow: build a standalone harness, run `ncu`, parse reports with the Python API, walk through six analysis dimensions, match patterns to a diagnosis playbook, and write an evidence-backed optimization report.
 
@@ -58,7 +51,7 @@ Keeps the skill version-controlled and easy to update; edits in the clone are pi
 
 ```bash
 # Clone somewhere stable
-git clone git@github.com:DongyunZou/ncu-report-skill.git ~/workspace/ncu-report-skill
+git clone https://github.com/fengwang/ncu-report-skill.git ~/workspace/ncu-report-skill
 
 # User-level install: make the skill available in every project
 mkdir -p ~/.claude/skills
@@ -77,7 +70,7 @@ Pull updates with `cd ~/workspace/ncu-report-skill && git pull`. The symlinks pi
 If you prefer a static copy over a symlink:
 
 ```bash
-git clone git@github.com:DongyunZou/ncu-report-skill.git /tmp/ncu
+git clone https://github.com/fengwang/ncu-report-skill.git /tmp/ncu
 mkdir -p ~/.claude/skills
 cp -r /tmp/ncu ~/.claude/skills/ncu-report-skill
 ```
@@ -86,7 +79,7 @@ cp -r /tmp/ncu ~/.claude/skills/ncu-report-skill
 
 ```bash
 cd /path/to/other-repo
-git submodule add git@github.com:DongyunZou/ncu-report-skill.git .claude/skills/ncu-report-skill
+git submodule add https://github.com/fengwang/ncu-report-skill.git .claude/skills/ncu-report-skill
 git commit -m "Add ncu-report-skill as a submodule"
 ```
 
