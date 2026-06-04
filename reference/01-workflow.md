@@ -87,6 +87,74 @@ Either way, **make sure `-lineinfo` is in the nvcc command**. Without it, source
 
 ---
 
+## Phase 2.5 — Framework kernel identification (when source is unavailable)
+
+**Use this phase when profiling kernels from LLM inference frameworks** (TensorRT-LLM, vLLM, PyTorch) where you don't have access to the kernel source code and can't build a standalone harness.
+
+### When this applies
+
+- Profiling production inference workloads running through TensorRT-LLM or vLLM
+- Analyzing `torch.compile`-generated or Triton-JIT-compiled kernels
+- Any scenario where the kernel binary exists but source is unavailable or impractical to extract
+
+### Step 1: Identify the target kernel
+
+You need the exact kernel name before profiling. Methods:
+
+**Via Nsight Systems (recommended for framework workloads):**
+```bash
+nsys profile -o timeline ./run_inference.py
+nsys stats timeline.nsys-rep --report cuda_gpu_kern_sum
+# Lists all kernels ranked by total GPU time — pick the hottest
+```
+
+**Via cuobjdump (for compiled binaries):**
+```bash
+cuobjdump --dump-function-names /path/to/compiled.so
+# For TensorRT-LLM: check the engine .so or the TRT runtime library
+```
+
+**Framework-specific kernel naming patterns:**
+- **TensorRT-LLM:** fused kernels often named `tensorrt_llm::kernels::*` or `cutlass::*`. Multi-head attention variants use names like `fmha_*` or `flash_*`.
+- **vLLM:** uses a mix of Triton-compiled kernels (names like `triton_*` with hash suffixes) and CUDA kernels (from FlashInfer, FlashAttention, or custom CUDA).
+- **PyTorch `torch.compile`:** generates Triton kernels with names like `triton_poi_fused_*_0` — these names change between runs. Use `TORCH_COMPILE_DEBUG=1` to dump generated code.
+- **Triton JIT:** kernel names include a hash that changes when the source or config changes. Profile a single run; don't expect name stability across runs.
+
+### Step 2: Profile without source
+
+Without `-lineinfo` in the compile flags, per-line stall attribution is unavailable. Collect only `--set full` (skip `--set source`):
+
+```bash
+ncu --set full \
+    --section PmSampling --section PmSampling_WarpStates \
+    -k "regex:YOUR_KERNEL_NAME" \
+    -c 1 \
+    -o $PROFILE_RUN_DIR/reports/full_<tag> \
+    ./run_inference [args]
+```
+
+### What you can still analyze
+
+| Analysis | Available? | Notes |
+|---|---|---|
+| SM throughput / DRAM throughput | Yes | SOL metrics work without source |
+| Occupancy & launch geometry | Yes | Grid/block sizes, register/shared-mem limits |
+| Aggregate stall breakdown | Yes | Which stall reasons dominate |
+| Tensor core utilization | Yes | Whether tensor cores are being used and which sub-pipe |
+| PM sampling timeline | Yes | Tail effect, pipeline bubbles |
+| Memory access patterns | Yes | Coalescing quality, L1/L2 hit rates |
+| Per-source-line stall hotspots | **No** | Requires `-lineinfo` at compile time |
+| SASS instruction attribution | **No** | Requires `-lineinfo` |
+
+### What to do with the results
+
+Without per-line attribution, focus on aggregate diagnosis:
+- Use the six-dimension framework (05-analysis-dimensions.md) — all six dimensions work with aggregate metrics.
+- Use the diagnosis playbook (06-diagnosis-playbook.md) — most patterns use aggregate signals.
+- Map findings to **framework-level configuration** rather than code changes: batch size, quantization settings, attention implementation choice, context length limits.
+
+---
+
 ## Phase 3 — Collect profiles
 
 Run two ncu invocations — **both outputs go under `$PROFILE_RUN_DIR/reports/`**. Details in [`03-collection.md`](03-collection.md).

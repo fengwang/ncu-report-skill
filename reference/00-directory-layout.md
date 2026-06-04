@@ -43,7 +43,7 @@ profile/<kernel>_v1_baseline/
 profile/<kernel>_v2_optimized/
 profile/<kernel>_v2_optimized_vs_v1/      # for comparison run
 profile/moe_fp8_v4_tma_prefetch/
-profile/flash_attn_b200_h128_baseline/
+profile/flash_attn_rtx5090_h128_baseline/
 ```
 
 Bad:
@@ -153,7 +153,7 @@ export PROFILE_RUN_DIR=/abs/path/to/profile/<kernel>_v1_baseline
 mkdir -p "$PROFILE_RUN_DIR"/{harness,reports,analysis}
 
 # build harness
-nvcc -O2 -std=c++17 -lineinfo -gencode=arch=compute_100,code=sm_100 \
+nvcc -O2 -std=c++17 -lineinfo -arch=sm_120 \
      harness.cu -o "$PROFILE_RUN_DIR/harness/kernel_harness"
 
 # run ncu

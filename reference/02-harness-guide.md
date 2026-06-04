@@ -43,11 +43,11 @@ A complete reusable template lives at [`../helpers/harness_template.cu`](../help
 Compile with:
 ```bash
 nvcc -O2 -std=c++17 -lineinfo \
-     -gencode=arch=compute_100,code=sm_100 \
+     -arch=sm_120 \
      harness.cu -o harness
 ```
 
-Replace `compute_100,code=sm_100` with your target SM version (check `nvidia-smi --query-gpu=compute_cap --format=csv`).
+Replace `sm_120` with your target SM version if profiling a different GPU (check `nvidia-smi --query-gpu=compute_cap --format=csv`).
 
 ---
 

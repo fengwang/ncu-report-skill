@@ -12,9 +12,9 @@ Save as `$PROFILE_RUN_DIR/REPORT.md`.
 # `<kernel_name>` Profiling Report
 
 **Kernel:** `<exact kernel name or template instantiation>`
-**Target GPU:** NVIDIA B200 (148 SM, CC 10.0)   (or whatever is actually being profiled)
+**Target GPU:** NVIDIA RTX 5090 (170 SM, CC 12.0)   (or whatever is actually being profiled)
 **Nsight Compute:** 2026.x.x
-**Compile flags:** `nvcc -O2 -std=c++17 -lineinfo -gencode=arch=compute_100,code=sm_100`
+**Compile flags:** `nvcc -O2 -std=c++17 -lineinfo -arch=sm_120`
 **Profile date:** YYYY-MM-DD
 **Run directory:** `profile/<run_name>/`
 
@@ -27,12 +27,12 @@ Save as `$PROFILE_RUN_DIR/REPORT.md`.
 - Harness: `profile/<run_name>/harness/*.cu` — what it is (standalone driver / the original binary / something else). Why.
 - Workloads: which real tensors / shapes were used. Cite the workload UUID or shape tuple.
 - Dispatch paths covered: list each `(SF / template params, grid, block)` combination profiled.
-- Metric-name caveats: any metric names that differ from stock NCU docs (common on B200 / sm_100).
+- Metric-name caveats: any metric names that differ from stock NCU docs (see `08-rtx5090-metric-names.md` for sm_120-specific names).
 
 Minimal runnable command listing:
 
     # Compile
-    nvcc -O2 -std=c++17 -lineinfo -gencode=arch=compute_100,code=sm_100 harness.cu -o harness
+    nvcc -O2 -std=c++17 -lineinfo -arch=sm_120 harness.cu -o harness
 
     # Profile (full + PM)
     ncu --set full --section PmSampling --section PmSampling_WarpStates \

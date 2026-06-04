@@ -155,7 +155,7 @@ ncu --list-sets           # list all sets
 ncu --list-sections       # list all sections
 ```
 
-Rough mapping (B200, ncu 2026.1):
+Rough mapping (RTX 5090, ncu 2026.2):
 
 | Set | Sections included | Replay passes | Use when |
 |---|---|---|---|
@@ -210,7 +210,7 @@ sudo nvidia-smi -lgc <boost_clock_mhz>
 sudo nvidia-smi -rgc
 ```
 
-For B200 this is usually unnecessary — the GPU boosts to steady-state during profiling because ncu replays the kernel 45+ times. If your results are jittery between runs, lock the clock.
+For RTX 5090 this may be beneficial — as a consumer GPU, boost clocks can vary with thermal state and power draw (575W TDP). If your results are jittery between runs, lock the clock.
 
 ---
 

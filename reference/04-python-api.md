@@ -4,7 +4,7 @@ Use the Python module, not CLI output, for anything beyond a quick look. The API
 
 Module path (adjust for your CUDA version):
 ```bash
-export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.1.0/extras/python
+export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python
 python3 -c "import ncu_report; print('OK')"
 ```
 
@@ -14,7 +14,7 @@ python3 -c "import ncu_report; print('OK')"
 
 ```python
 import sys
-sys.path.insert(0, "/usr/local/cuda-13.2/nsight-compute-2026.1.0/extras/python")
+sys.path.insert(0, "/usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python")
 import ncu_report
 
 report = ncu_report.load_report("path/to/full_<tag>.ncu-rep")
@@ -49,7 +49,7 @@ print(f"DRAM read BW:  {dram_read_bw/1e9:.2f} GB/s")
 print(f"Duration:      {duration_ns/1e3:.2f} µs")
 ```
 
-**Always wrap in a try/except or helper.** Metric names differ between GPU generations — see [`08-b200-metric-names.md`](08-b200-metric-names.md). A metric that exists on A100 may return `KeyError` on B200.
+**Always wrap in a try/except or helper.** Metric names differ between GPU generations — see [`08-rtx5090-metric-names.md`](08-rtx5090-metric-names.md). A metric that exists on A100 may return `KeyError` on RTX 5090.
 
 ---
 
@@ -193,7 +193,7 @@ for n in sorted(action.metric_names()):
             print(f"{n} = ERROR {e}")
 ```
 
-This is how I built [`08-b200-metric-names.md`](08-b200-metric-names.md) — by enumerating everything available on sm_100.
+This is how [`08-rtx5090-metric-names.md`](08-rtx5090-metric-names.md) was built — by enumerating everything available on the target GPU.
 
 ---
 
@@ -275,7 +275,7 @@ This makes future re-analysis cheap: the raw data lives as JSON, you don't need 
 
 ## Gotchas
 
-- **`KeyError` on a metric that "should" exist**: the metric has a different name on this GPU. Check [`08-b200-metric-names.md`](08-b200-metric-names.md) or enumerate with `action.metric_names()`.
+- **`KeyError` on a metric that "should" exist**: the metric has a different name on this GPU. Check [`08-rtx5090-metric-names.md`](08-rtx5090-metric-names.md) or enumerate with `action.metric_names()`.
 - **`num_instances() == 0`** but you expected per-instance data: the metric wasn't collected in instanced mode, or the section that produces it wasn't requested. Re-run ncu with the right `--section`.
 - **`has_correlation_ids() == False`** on a source-level metric: `-lineinfo` wasn't on the compile line. Rebuild.
 - **`source_info(pc)` returns None**: same as above — rebuild with `-lineinfo`.

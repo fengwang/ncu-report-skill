@@ -88,7 +88,7 @@ For JIT / framework-integrated builds:
 
 ## Metric returns `None`
 
-1. **Wrong metric name.** See `08-b200-metric-names.md`. Many stock docs use names that don't exist on B200.
+1. **Wrong metric name.** See `08-rtx5090-metric-names.md`. Many stock docs use names that may not exist on RTX 5090 / sm_120.
 2. **Metric not in the collected sections.** Add the relevant `--section` or `--set`.
 3. **Value is legitimately missing.** Some metrics (like tensor pipe counters) return 0 rather than None when the feature wasn't used; but others return None for hardware not present.
 
@@ -107,8 +107,8 @@ def safe(action, name, default=None):
 
 ```bash
 find /usr/local/cuda* -name "ncu_report*" -type f 2>/dev/null
-# e.g. /usr/local/cuda-13.2/nsight-compute-2026.1.0/extras/python/ncu_report.py
-export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.1.0/extras/python
+# e.g. /usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python/ncu_report.py
+export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python
 python3 -c "import ncu_report; print('OK')"
 ```
 
@@ -172,12 +172,58 @@ ncu handles CUDA Graph launches fine — each captured kernel shows up as a sepa
 
 ---
 
+## Consumer GPU-specific issues (RTX 5090)
+
+These issues apply specifically to profiling on consumer GPUs like the RTX 5090, and generally do not affect data-center GPUs.
+
+### Display driver interference
+
+On consumer GPUs, a display is typically connected and the desktop compositor (X11/Wayland on Linux, DWM on Windows) competes for GPU cycles during profiling. This can cause:
+- Jitter in timing metrics between runs
+- Slightly higher memory usage (compositor VRAM allocation)
+- Occasional spikes in SM utilization from compositor rendering
+
+**Mitigation:**
+- Run in a headless / SSH session if possible (`systemctl isolate multi-user.target` on systemd Linux)
+- If a display is needed, minimize desktop activity during profiling
+- Lock GPU clocks (see Reproducibility section below)
+
+### Power throttling under profiling
+
+RTX 5090's 575W TDP is high for a consumer card. During sustained ncu profiling (45+ replay passes), the GPU may hit thermal or power limits:
+- `nvidia-smi -q -d POWER` shows current power draw and limit
+- `nvidia-smi -q -d CLOCK` shows if clocks are throttled below boost
+
+**Mitigation:**
+```bash
+# Check for throttling during profiling
+nvidia-smi -q -d PERFORMANCE  # look for "SW Thermal Slowdown" or "SW Power Cap"
+```
+
+If throttling is detected, ensure adequate cooling (case airflow, no adjacent heat sources) and consider reducing the power limit slightly for stable sustained clocks:
+```bash
+sudo nvidia-smi -pl 550  # slightly below 575W TDP for stability
+```
+
+### Boost clock variability
+
+Consumer GPUs have more variable boost clocks than data-center GPUs (which often run at a locked frequency). RTX 5090 boosts up to 2,407 MHz but may sustain lower under profiling load.
+
+For reproducible results, always lock clocks during profiling:
+```bash
+sudo nvidia-smi -lgc 2407   # lock to boost clock
+# profile
+sudo nvidia-smi -rgc        # unlock
+```
+
+---
+
 ## Output interpretation
 
 ### "`sm__throughput = X%`, is that good?"
 
 It depends on the kernel type:
-- GEMM / matmul: should be 50%+ on B200. Below 30% is bad.
+- GEMM / matmul: should be 50%+ on RTX 5090. Below 30% is bad.
 - Element-wise / reduction: usually 10-30%, because they're DRAM-BW-bound.
 - Attention / recurrence kernels: varies wildly; compare against a reference implementation.
 

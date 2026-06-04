@@ -1,6 +1,6 @@
 # Diagnosis Playbook — Pattern → Cause → Fix
 
-For each observed NCU signal, what does it typically mean, and what's the first fix to try? This synthesizes the Blackwell programming principles (the companion `blackwell-cuda-programming.md` at the repo root) with the profiling signals.
+For each observed NCU signal, what does it typically mean, and what's the first fix to try? This synthesizes the RTX 5090 programming guidelines (see `blackwell-cuda-programming.md` at the repo root) with the profiling signals.
 
 Read this after you've gathered the metrics (via [`05-analysis-dimensions.md`](05-analysis-dimensions.md)) — here you translate metrics into diagnoses and fix directions.
 
@@ -24,7 +24,7 @@ Most kernels will match 2-4 patterns simultaneously. **Rank them by magnitude** 
 
 **Signals:**
 - `launch__waves_per_multiprocessor < 0.5`
-- `launch__grid_size < device__attribute_multiprocessor_count` (e.g., 64 blocks on a 148-SM B200)
+- `launch__grid_size < device__attribute_multiprocessor_count` (e.g., 64 blocks on a 170-SM RTX 5090)
 - NCU rule: *"The grid for this launch is configured to execute only N blocks, which is less than the M multiprocessors used."* with `Est. Speedup: 50-90%`
 
 **Why:** each CTA occupies at most one SM; with fewer CTAs than SMs, some SMs are completely idle throughout the kernel.
@@ -42,7 +42,7 @@ Most kernels will match 2-4 patterns simultaneously. **Rank them by magnitude** 
 - LLM decode (batch=1, query_len=1) is fundamentally small. Split-K over KV length is the standard mitigation.
 - Final reduction stages of a multi-level reduction are naturally small; fuse them into the producing kernel.
 
-**Cross-ref:** Blackwell principle 1 (the companion `blackwell-cuda-programming.md` at the repo root).
+**Cross-ref:** See `blackwell-cuda-programming.md` § Ensure Sufficient Parallelism.
 
 ---
 
@@ -69,7 +69,7 @@ Most kernels will match 2-4 patterns simultaneously. **Rank them by magnitude** 
 - Short kernels (< 10 µs) where partial-wave cost is absolute-small.
 - Workloads where you already pre-sort / pre-pack.
 
-**Cross-ref:** Blackwell principle 11.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Optimize Grid/Block Configuration.
 
 ---
 
@@ -95,7 +95,7 @@ Most kernels will match 2-4 patterns simultaneously. **Rank them by magnitude** 
 - Gather/scatter by random index (sparse matmul, embedding lookup) — fundamentally uncoalesced. Sort the indices for locality if possible.
 - Graph / tree traversal.
 
-**Cross-ref:** Blackwell principles 2, 13.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Coalesce Memory Accesses, § Vectorize Memory Access.
 
 ---
 
@@ -135,7 +135,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 **First-line fix:** increase in-flight memory requests:
 - **Unroll the load loop** so 4-8 loads are issued before any value is used. Compiler + hardware reorders.
 - **Add more independent warps** — raise occupancy (Pattern J).
-- **`cp.async` (Ampere+) / TMA (Hopper+) / tcgen05.cp (Blackwell)** for bulk async loads that don't block issue.
+- **`cp.async` (Ampere+)** for bulk async loads that don't block issue. Note: TMA and `tcgen05.cp` are data-center Blackwell only, not available on sm_120.
 
 **Deeper fixes:**
 - Software pipelining: while tile N is being computed, pre-load tile N+1 into shared memory.
@@ -144,7 +144,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 **Exceptions:**
 - Pointer chasing / graph traversal — data dep chain is fundamental.
 
-**Cross-ref:** Blackwell principles 7, 15.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Hide Memory Latency, § Pipeline Compute and Memory Access.
 
 ---
 
@@ -155,19 +155,19 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 - `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed = 0%`.
 - Workload is matmul-ish (GEMM, attention, conv).
 
-**Why:** kernel uses scalar FMA via the ALU pipe instead of tensor cores. On B200, tensor cores can do 16× the FMA throughput of scalar pipes for BF16→FP32.
+**Why:** kernel uses scalar FMA via the ALU pipe instead of tensor cores. On RTX 5090, tensor cores deliver 209.5 TFLOPS BF16 vs 104.8 TFLOPS FP32 scalar — 2× higher throughput for BF16→FP32 operations.
 
-**First-line fix:** use `WMMA` (Ampere+) / `wgmma` (Hopper) / `tcgen05.mma` (Blackwell). If hand-rolling is too much, use CUTLASS 4.x or cuBLAS, which are already tuned for the target arch.
+**First-line fix:** use `mma.sync` PTX or the WMMA C++ API on sm_120. If hand-rolling is too much, use CUTLASS 4.x or cuBLAS, which are already tuned for the target arch. Note: `wgmma` and `tcgen05.mma` are NOT available on sm_120 (data-center Blackwell only).
 
 **Deeper fixes:**
 - Restructure data layout to meet MMA tile-shape constraints (e.g., `m16n8k16` for BF16).
-- Use shared memory + TMA (Hopper) / TMEM (Blackwell) staging.
+- Use shared memory staging for MMA operand preparation.
 
 **Exceptions:**
 - Non-matrix workloads (reduction, sort, element-wise) — tensor cores don't help.
 - Small matrices (M, N, K < 32) — tensor-core tiles are too coarse.
 
-**Cross-ref:** Blackwell principle 10; the Blackwell doc's section on tcgen05 has PTX examples.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Use Tensor Cores Effectively.
 
 ---
 
@@ -192,7 +192,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 **Exceptions:**
 - NCCL-style communication — atomics are fundamental there.
 
-**Cross-ref:** Blackwell principle 12.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Reduce Atomic Contention.
 
 ---
 
@@ -215,7 +215,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 - Broadcast reads (all lanes read same address) are conflict-free.
 - Low shared-mem access volume — don't bother.
 
-**Cross-ref:** Blackwell principle 4.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Avoid Shared Memory Bank Conflicts.
 
 ---
 
@@ -234,7 +234,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 **Deeper fixes:**
 - Warp-specialized execution: producer warps and consumer warps with mbarrier instead of `__syncthreads`.
 
-**Cross-ref:** Blackwell principle 16.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Reduce Synchronization Overhead.
 
 ---
 
@@ -270,7 +270,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 **Exceptions:**
 - Large fused kernels (FlashAttention) accept some spill in exchange for larger savings upstream.
 
-**Cross-ref:** Blackwell principle 6.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Control Register Pressure.
 
 ---
 
@@ -283,7 +283,7 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 
 **First-line fix:** add `f` suffix to all literals: `1.0f`, `0.5f`, `3.14f`. Add `__expf` / `__logf` / `__sinf` variants for transcendentals.
 
-**Cross-ref:** Blackwell principle 8.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Use Appropriate Math Precision.
 
 ---
 
@@ -298,9 +298,9 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 **First-line fix:** double-buffer. Use two shared-memory tiles; while computing on tile A, load tile B. `__syncthreads` between phases.
 
 **Deeper fixes:**
-- Multi-stage pipeline (3-4 stages on Blackwell — see Blackwell principle 15). Use `cp.async` / TMA for async loads.
+- Multi-stage pipeline (3-4 stages). Use `cp.async` for async loads on sm_120.
 
-**Cross-ref:** Blackwell principle 15.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Pipeline Compute and Memory Access.
 
 ---
 
@@ -321,7 +321,109 @@ If `K < 8`: consider batching multiple iterations' results into a vectorized wri
 - Tree reductions in warps (last few steps have half / quarter / ... active). Use `__shfl_down_sync` to handle cleanly.
 - Boundary handling (a few warps at tensor edge) — not worth fighting.
 
-**Cross-ref:** Blackwell principle 5.
+**Cross-ref:** See `blackwell-cuda-programming.md` § Avoid Warp Divergence.
+
+---
+
+## Pattern O — Decode bandwidth ceiling (LLM-specific)
+
+**Signals:**
+- `dram__bytes_read.sum.pct_of_peak_sustained_elapsed > 80%`.
+- `launch__grid_size` is small (batch=1, single-token decode → few thread blocks).
+- `sm__throughput.avg.pct_of_peak_sustained_elapsed` is low (DRAM is the bottleneck, not compute).
+- Kernel is identified as a decode-phase operation (attention or GEMV with batch=1).
+
+**Why:** single-token autoregressive decode is fundamentally memory-bandwidth-bound. Each decode step reads the entire weight matrix and KV-cache but produces only one output token. On RTX 5090 with ~1.8 TB/s DRAM bandwidth (4.4× lower than data-center Blackwell), decode kernels are proportionally more bandwidth-starved.
+
+For a 7B FP16 model: ~14 GB of weights must be read per token. At 1.8 TB/s, that's ~7.8 ms per token — a hard floor that no compute optimization can break.
+
+**First-line fix:**
+- **Quantize weights:** FP16 → FP8 halves the bytes read, roughly doubling decode token throughput. FP4 (library-only on sm_120) halves again.
+- **Quantize KV-cache:** FP16 → FP8/INT8 reduces attention's memory footprint.
+- **Operator fusion:** fuse adjacent memory-bound ops to reduce total DRAM round-trips.
+
+**Deeper fixes:**
+- **Speculative decoding:** generate multiple candidate tokens in a single step, then verify in batch — amortizes the weight-read cost over multiple tokens.
+- **Batching (if latency budget allows):** even batch=2 doubles the arithmetic intensity, moving the kernel closer to the compute-bound regime.
+- **Model-level:** use a smaller model, or a model with fewer layers / smaller hidden dimension that fits the bandwidth budget.
+
+**Exceptions:**
+- Batched inference (batch > 4) — the kernel is likely compute-bound, not bandwidth-bound.
+- Prefill phase (processing the full prompt) — prefill is typically compute-bound due to high arithmetic intensity.
+
+**Cross-ref:** See `blackwell-cuda-programming.md` § Why Decode is Deeply Memory-Bandwidth-Bound.
+
+---
+
+## Pattern P — KV-cache thrashing (LLM-specific)
+
+**Signals:**
+- `lts__t_sector_hit_rate.pct` < 50% during attention kernels.
+- `dram__bytes_read.sum` is significantly larger than expected from weight reads alone — the excess is KV-cache reload from DRAM.
+- Estimated KV-cache size exceeds 96 MB (RTX 5090 L2 capacity).
+
+**KV-cache size estimation:**
+```
+kv_bytes = 2 × num_layers × num_kv_heads × head_dim × seq_length × bytes_per_element
+```
+Example: 32 layers × 8 KV heads × 128 head_dim × 4096 seq_len × 2 bytes (FP16) × 2 (K+V) = 512 MB — well beyond the 96 MB L2.
+
+**Why:** when the KV-cache exceeds L2 capacity, every attention pass must reload KV entries from DRAM. This converts attention from a compute-bound operation (where data is reused from L2) to a bandwidth-bound operation (where DRAM is the bottleneck). On RTX 5090 with 96 MB L2 and 60 MB persistent L2, the cache pressure is tighter than on data-center GPUs.
+
+**First-line fix:**
+- **Quantize KV-cache:** FP16 → FP8 or INT8 halves the cache footprint.
+- **Persistent L2 partitioning:** use `cudaCtxSetLimit(cudaLimitPersistingL2CacheSize, ...)` to reserve up to 60 MB of L2 for KV-cache. Requires `cudaStreamSetAttribute` per-stream.
+
+**Deeper fixes:**
+- **GQA / MQA:** grouped-query or multi-query attention architectures reduce the number of KV heads, shrinking the cache.
+- **Reduce context length:** if the use case allows, shorter contexts fit in L2.
+- **Sliding window attention:** only cache the most recent N tokens' KV pairs.
+- **PagedAttention (vLLM):** reduces fragmentation but does not reduce total KV size.
+
+**Exceptions:**
+- Short context lengths where KV-cache fits comfortably in L2 (< 96 MB).
+- Multi-head attention with very few layers (unlikely to exceed L2).
+
+**Cross-ref:** See `blackwell-cuda-programming.md` § KV-Cache Memory Budget.
+
+---
+
+## Pattern Q — Quantization mismatch (LLM-specific)
+
+**Signals:**
+- `sm__pipe_tensor_subpipe_hmma_cycles_active.avg.pct_of_peak_sustained_elapsed > 0` (FP16/BF16 tensor pipe is active).
+- `sm__pipe_tensor_subpipe_imma_cycles_active.avg.pct_of_peak_sustained_elapsed = 0` (INT8 pipe is idle).
+- No FP8 tensor core activity visible in metrics.
+- The workload is known to be quantizable to FP8 or FP4.
+
+**Why:** RTX 5090 tensor cores support a full precision spectrum with increasing throughput:
+
+| Precision | TFLOPS/TOPS | Roofline breakpoint (FLOPs/byte) |
+|---|---|---|
+| FP32 (scalar) | 104.8 | 58.5 |
+| BF16/FP16 (tensor, dense) | 209.5 | 116.9 |
+| FP8 (tensor, dense) | 419.0 | 233.8 |
+| INT8 (tensor, dense) | 838 | 467.6 |
+| FP4 (tensor, sparse 2:4)* | 3,352 | 1,870 |
+
+*FP4 figure is structured sparsity (2:4); all others are dense.
+
+Using FP16 when FP8 is viable means 2× less compute throughput and no bandwidth savings. For decode workloads that are already bandwidth-bound, quantization simultaneously reduces memory traffic AND increases compute throughput.
+
+**First-line fix:**
+- **Enable FP8 inference:** most LLM frameworks (TensorRT-LLM, vLLM) support FP8 weight quantization. Switch the model to FP8 and re-profile.
+- **Verify tensor pipe utilization:** after switching to FP8, check that `sm__pipe_tensor_subpipe_imma_cycles_active` or the FP8-specific pipe is now active.
+
+**Deeper fixes:**
+- **FP4/NVFP4 quantization:** provides another 2× throughput, but is library-only on sm_120 (no direct PTX access). TensorRT-LLM has FP4 support.
+- **Mixed-precision quantization:** quantize most layers to FP8/FP4, keep accuracy-sensitive layers (e.g., first/last, attention logits) at FP16.
+
+**Exceptions:**
+- Accuracy-critical layers where quantization degrades output quality beyond acceptable thresholds.
+- Small matrices (M, N, K < 32) where tensor core tile overhead exceeds the precision benefit.
+- Already using the lowest viable precision — no room to quantize further.
+
+**Cross-ref:** See `blackwell-cuda-programming.md` § Quantization Impact on Decode.
 
 ---
 

@@ -5,7 +5,7 @@ Every kernel profile report is ambiguous until you look at it through specific l
 For each dimension this doc describes:
 
 - **What you're answering**
-- **Which metrics to read** (B200 / sm_100 names)
+- **Which metrics to read** (RTX 5090 / sm_120 names)
 - **How to read them** (what's "normal", what's "bad")
 - **Which `helpers/` to run**
 
@@ -14,6 +14,8 @@ For each dimension this doc describes:
 ## Dimension 1 — SM occupancy & launch geometry
 
 **What:** is the grid large enough to fill the GPU? Is occupancy being limited by registers, shared memory, or block-size constraints?
+
+**RTX 5090 occupancy limits:** 170 SMs, 48 warps/SM max, 24 blocks/SM max, 1,536 threads/SM, 100 KB shared memory/SM, 65,536 registers/SM.
 
 **Metrics:**
 ```
@@ -27,14 +29,14 @@ launch__occupancy_limit_blocks
 launch__occupancy_limit_registers
 launch__occupancy_limit_shared_mem
 launch__occupancy_limit_warps
-device__attribute_multiprocessor_count         (148 on B200)
+device__attribute_multiprocessor_count         (170 on RTX 5090)
 sm__maximum_warps_per_active_cycle_pct          (theoretical occupancy %)
 sm__warps_active.avg.pct_of_peak_sustained_active  (achieved occupancy %)
 ```
 
 **Reading:**
 
-- **Waves / SM < 1**: grid is too small to fill the chip. On B200 with 148 SMs, if `launch__grid_size < 148 × blocks_per_SM`, some SMs sit idle the entire time. `Est. Speedup` from NCU often hits 50-90% here.
+- **Waves / SM < 1**: grid is too small to fill the chip. On RTX 5090 with 170 SMs, if `launch__grid_size < 170 × blocks_per_SM`, some SMs sit idle the entire time. `Est. Speedup` from NCU often hits 50-90% here.
 - **Waves / SM in [1, 2)**: you have a tail wave (partial last wave). Tail effect magnitude is roughly `(last_wave_blocks / wave_size) × (block_exec_time / total_kernel_time)`.
 - **Waves / SM > 4**: grid is plenty big, scheduling averages out.
 - **Theoretical occupancy 100% but achieved << 100%**: stalls are the bottleneck, not launch config. Move to Dimension 3.
@@ -183,9 +185,9 @@ sm__ops_path_tensor_op_hmma_src_bf16_dst_fp32_sparsity_off.avg       # BF16×BF1
 
 - **`sm__pipe_tensor_cycles_active = 0%`**: no tensor core usage at all. For matmul-ish kernels (attention, GEMM, conv), this is almost always a missed optimization.
 - **`... = X%` but X << 50%**: tensor cores are being used but underutilized. Usually means data isn't arriving fast enough (Dimension 6) or tile sizes are wrong.
-- **`... > 50%`** on B200: kernel is doing well on the Tensor-Core front. Focus elsewhere.
+- **`... > 50%`** on RTX 5090: kernel is doing well on the Tensor-Core front. Focus elsewhere.
 
-**Blackwell-specific note:** B200 uses 5th-gen tensor cores with `tcgen05.mma` + TMEM accumulators. Hand-rolled kernels need `tcgen05.alloc`, `tcgen05.mma`, `tcgen05.ld`, `tcgen05.dealloc` PTX. Most projects should use CUTLASS 4.x / cuBLAS instead of hand-rolling. See `../blackwell-cuda-programming.md` at the repo root.
+**RTX 5090 note:** sm_120 uses 5th-gen tensor cores accessed via `mma.sync` PTX or the WMMA C++ API. The data-center Blackwell ISA (`tcgen05.mma`, `wgmma`, TMEM) is **not available** on sm_120. Most projects should use CUTLASS 4.x / cuBLAS instead of hand-rolling. See `../blackwell-cuda-programming.md` § Tensor Core Programming.
 
 **Fix direction:** if you see 0% and the workload is matrix-multiplication-shaped, redesign around MMA. This is usually a major refactor but gives 2-10× on compute-bound paths.
 
@@ -214,7 +216,7 @@ pmsampling:smsp__warps_issue_stalled_short_scoreboard.avg
 
 **Helper:** `plot_timeline.py` — renders ASCII plots. Look at multiple series side-by-side (SM throughput + DRAM throughput + long_scoreboard stalls) to distinguish the shapes.
 
-**Note:** PM sampling has ~2µs interval on B200. Very short kernels (< 20 µs) produce few samples — interpret with care.
+**Note:** PM sampling has ~2µs interval on RTX 5090. Very short kernels (< 20 µs) produce few samples — interpret with care.
 
 ---
 

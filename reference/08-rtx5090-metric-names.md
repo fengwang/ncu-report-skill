@@ -1,6 +1,8 @@
-# B200 (sm_100) Metric Name Reference
+# RTX 5090 (sm_120) Metric Name Reference
 
-The stock `ncu_profile_skill.md` in older docs references metric names that **don't exist on B200 / sm_100**. This doc lists the actual names available in Nsight Compute 2026.1 on B200 and flags which names are different from older GPUs.
+> **Validation status:** All metric names in this document are carried forward from the prior data-center Blackwell baseline. They have NOT been validated on sm_120 (RTX 5090) yet. Session 3 will validate each metric against actual ncu output on the local RTX 5090. Metric names can change between compute capability versions — always verify with `action.metric_names()`.
+
+The stock `ncu_profile_skill.md` in older docs references metric names that may not exist on sm_120. This doc lists metric names believed to be available in Nsight Compute 2026.2 on RTX 5090, carried forward from the prior data-center Blackwell baseline. Names are flagged as unverified where applicable.
 
 If a metric returns `None` on your kernel, first check this doc, then enumerate available names:
 
@@ -12,7 +14,7 @@ action.metric_names()
 
 ## Metric names that changed
 
-| Stock skill name (older GPU) | B200 / sm_100 name |
+| Stock skill name (older GPU) | RTX 5090 / sm_120 name (unverified) |
 |---|---|
 | `smsp__inst_executed_op_global_ld.sum` | **`smsp__sass_inst_executed_op_global_ld.sum`** |
 | `smsp__inst_executed_op_global_st.sum` | **`smsp__sass_inst_executed_op_global_st.sum`** |
@@ -22,14 +24,14 @@ action.metric_names()
 | `smsp__inst_executed_op_shared_st.sum` | **`smsp__sass_inst_executed_op_shared_st.sum`** |
 | `l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio` | (not available directly; compute from `l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum / l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum`) |
 | `dram__bytes.sum` | (not directly; use `dram__bytes_read.sum + dram__bytes_write.sum`) |
-| `sm__inst_executed_pipe_fmaheavy.*` | *not present on B200* — use `sm__inst_executed_pipe_fma.*` instead |
+| `sm__inst_executed_pipe_fmaheavy.*` | *not present on Blackwell* — use `sm__inst_executed_pipe_fma.*` instead |
 | `smsp__warps_issue_stalled_<reason>_per_issue_active.pct` | **`smsp__average_warps_issue_stalled_<reason>_per_issue_active.ratio`** (note `average_` prefix and `ratio` suffix) |
 
 ---
 
-## Canonical sm_100 metric set (curated)
+## Canonical sm_120 metric set (curated, unverified)
 
-These metric names have been confirmed to exist and return meaningful values on B200 / sm_100 with Nsight Compute 2026.1. Always verify for your specific ncu version by enumerating with `action.metric_names()` — NVIDIA occasionally renames metrics between releases.
+These metric names were confirmed on prior data-center Blackwell with Nsight Compute 2026.1 and are carried forward to sm_120 (RTX 5090) with Nsight Compute 2026.2. **They have not been validated on the local RTX 5090 yet** — Session 3 will verify each group. Always verify for your specific ncu version by enumerating with `action.metric_names()` — NVIDIA occasionally renames metrics between compute capability versions.
 
 ### Launch geometry / occupancy
 ```
@@ -202,19 +204,17 @@ Note: some `pmsampling:` metrics (notably `pmsampling:sm__throughput.*` and `pms
 
 ---
 
-## Discovering metrics for new GPUs
-
-When running on a GPU other than B200:
+## Discovering metrics on RTX 5090
 
 ```bash
-# All available metrics for a given chip
-ncu --query-metrics --chip gb202        # B200 = GB202 / gb202 in some docs
+# All available metrics for RTX 5090 (GB202 die)
+ncu --query-metrics --chip gb202
 
 # Filter by name pattern
 ncu --query-metrics --chip gb202 | grep -i pmsampling
 ncu --query-metrics --chip gb202 | grep -i issue_stalled
 
-# Valid chip names: gb202 (B200), gh200 (H200 / Hopper), ga102 (Ampere), etc.
+# Other chip names for reference: gh200 (H200 / Hopper), ga102 (Ampere), etc.
 ```
 
 From Python, you can also enumerate per-report:
