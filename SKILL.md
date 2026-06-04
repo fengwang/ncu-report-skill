@@ -1,13 +1,13 @@
 ---
 name: ncu-report-skill
-description: Profile CUDA kernels with Nsight Compute on B200 / sm_100. Use when the user asks to profile a kernel, analyze its performance, diagnose bottlenecks, read an ncu report, or write an optimization plan — including variants in Chinese ("profile 一下", "为什么慢", "ncu 报告").
+description: Profile CUDA kernels with Nsight Compute on RTX 5090 / sm_120. Use when the user asks to profile a kernel, analyze its performance, diagnose bottlenecks, read an ncu report, or write an optimization plan — including variants in Chinese ("profile 一下", "为什么慢", "ncu 报告").
 ---
 
-# Skill: CUDA Kernel Profiling (B200 / Nsight Compute)
+# Skill: CUDA Kernel Profiling (RTX 5090 / Nsight Compute)
 
 **When to use:** user asks to profile a CUDA kernel, analyze its performance, find its bottlenecks, or write an optimization plan based on Nsight Compute data. Triggers include: "profile X", "为什么这个 kernel 慢", "ncu report 说...", "下一步怎么优化", "帮我看一下这份 ncu 报告".
 
-**Target hardware (this repo):** NVIDIA B200 (sm_100, CC 10.0, 148 SMs, 192 GB HBM3e). Most advice below is generic; B200-specific notes are explicitly marked.
+**Target hardware (this repo):** NVIDIA GeForce RTX 5090 (sm_120, CC 12.0, 170 SMs, 32 GB GDDR7). Most advice below is generic; RTX 5090-specific notes are explicitly marked.
 
 ---
 
@@ -53,7 +53,7 @@ Most under-performing CUDA kernels are under-performing for exactly one reason t
 | [`reference/05-analysis-dimensions.md`](reference/05-analysis-dimensions.md) | Six analysis dimensions: occupancy, balance, stalls, tensor core, timeline, memory |
 | [`reference/06-diagnosis-playbook.md`](reference/06-diagnosis-playbook.md) | Pattern → diagnosis → fix. Merges Blackwell programming principles with NCU signals |
 | [`reference/07-report-template.md`](reference/07-report-template.md) | How to structure the final report |
-| [`reference/08-b200-metric-names.md`](reference/08-b200-metric-names.md) | sm_100 metric names vs older GPUs — many common names are different |
+| [`reference/08-b200-metric-names.md`](reference/08-b200-metric-names.md) | sm_120 metric names vs older GPUs — many common names are different (file rename pending Session 2) |
 | [`reference/09-common-issues.md`](reference/09-common-issues.md) | Permissions, PM sampling gaps, TVM-FFI / PyTorch gotchas |
 
 ### Helpers (reusable code)
@@ -72,7 +72,7 @@ Most under-performing CUDA kernels are under-performing for exactly one reason t
 
 ## Critical lessons (don't skip)
 
-1. **The stock `ncu_profile_skill.md` metric names don't all work on B200.** Names like `smsp__inst_executed_op_global_ld.sum`, `dram__bytes.sum`, `l1tex__average_t_sectors_per_request*.ratio` return `None` on sm_100. Use the sm_100 names in [`reference/08-b200-metric-names.md`](reference/08-b200-metric-names.md) or enumerate via `action.metric_names()`.
+1. **The stock `ncu_profile_skill.md` metric names don't all work on RTX 5090.** Names like `smsp__inst_executed_op_global_ld.sum`, `dram__bytes.sum`, `l1tex__average_t_sectors_per_request*.ratio` return `None` on sm_120. Use the sm_120-compatible names in [`reference/08-b200-metric-names.md`](reference/08-b200-metric-names.md) (file rename pending Session 2) or enumerate via `action.metric_names()`.
 
 2. **Always compile with `-lineinfo`.** Without it, ncu's source view is blank and you cannot do per-line stall analysis. If you can't add `-lineinfo` to the build system (TVM-FFI, PyTorch inline, JIT), **build a standalone harness** — that's the whole point.
 
