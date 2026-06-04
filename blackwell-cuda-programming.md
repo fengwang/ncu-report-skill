@@ -1,4 +1,4 @@
-# GPU Kernel Programming Guide
+# GPU Kernel Programming Guide for NVIDIA RTX 5090 (sm_120)
 
 ## Target Platform
 
