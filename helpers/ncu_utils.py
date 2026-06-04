@@ -3,25 +3,21 @@
 Usage:
     from ncu_utils import load_report, safe, dump_all_metrics
 
-The caller is expected to have set PYTHONPATH to include ncu_report, e.g.:
-    export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.1.0/extras/python
-
-If ncu_report is not importable, we try a small list of common paths.
+ncu_report is typically available as a system Python package (installed with
+Nsight Compute). If not importable, we try common CUDA installation paths:
+    export PYTHONPATH=$PYTHONPATH:/usr/local/cuda/nsight-compute/extras/python
 """
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
 # --- Attempt to locate ncu_report --------------------------------------------
 def _locate_ncu_report():
     candidates = [
-        "/usr/local/cuda-13.2/nsight-compute-2026.1.0/extras/python",
         "/usr/local/cuda/nsight-compute/extras/python",
     ]
-    # Also probe /usr/local/cuda-*/nsight-compute-*/extras/python
     for root in ["/usr/local", "/opt/nvidia", "/opt/cuda"]:
         p = Path(root)
         if not p.is_dir():
@@ -31,7 +27,10 @@ def _locate_ncu_report():
         for sub in p.glob("nsight-compute-*/extras/python"):
             candidates.append(str(sub))
     for c in candidates:
-        if Path(c).is_dir() and (Path(c) / "ncu_report.py").exists():
+        d = Path(c)
+        if not d.is_dir():
+            continue
+        if (d / "ncu_report.py").exists() or (d / "ncu_report" / "__init__.py").exists():
             return c
     return None
 
@@ -85,7 +84,7 @@ def safe_many(action, names, default=None):
 
 def metric_or_none(action, *candidates):
     """Try each candidate name, return first that works. Useful for
-    GPU-gen-specific names: some metric names differ on sm_100 vs sm_90."""
+    GPU-gen-specific names: some metric names differ across CC versions."""
     for n in candidates:
         v = safe(action, n, None)
         if v is not None:
@@ -204,13 +203,11 @@ def pc_to_source_line(action, pc):
 
 # --- Curated metric sets -----------------------------------------------------
 #
-# These metric names are known to exist and return meaningful values on
-# B200 / sm_100 with Nsight Compute 2026.x. For a fuller list and rationale
-# see ../reference/08-b200-metric-names.md. Other GPU generations (A100, H100,
-# consumer cards) and future ncu releases may need alternate names — always
-# verify with action.metric_names() if a metric returns None.
+# Validated against RTX 5090 / sm_120 with ncu 2026.2 (action.metric_names()).
+# For a fuller list and rationale see ../reference/08-rtx5090-metric-names.md.
+# Always verify with action.metric_names() if a metric returns None.
 
-B200_KEY_METRICS = [
+RTX5090_KEY_METRICS = [
     # Launch geometry
     "launch__grid_size",
     "launch__block_size",
@@ -262,14 +259,14 @@ B200_KEY_METRICS = [
     "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active",
     "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed",
     "sm__ops_path_tensor_op_hmma_src_bf16_dst_fp32_sparsity_off.avg",
-    # DRAM
-    "dram__bytes_read.sum",
-    "dram__bytes_read.sum.pct_of_peak_sustained_elapsed",
-    "dram__bytes_read.sum.per_second",
-    "dram__bytes_write.sum",
-    "dram__bytes_write.sum.pct_of_peak_sustained_elapsed",
-    "dram__sectors_read.sum",
-    "dram__sectors_write.sum",
+    # DRAM (sm_120 uses dram__bytes_op_read/write instead of dram__bytes_read/write)
+    "dram__bytes_op_read.sum",
+    "dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed",
+    "dram__bytes_op_read.sum.per_second",
+    "dram__bytes_op_write.sum",
+    "dram__bytes_op_write.sum.pct_of_peak_sustained_elapsed",
+    "dram__sectors_op_read.sum",
+    "dram__sectors_op_write.sum",
     # Caches
     "l1tex__t_sector_hit_rate.pct",
     "lts__t_sector_hit_rate.pct",
@@ -324,6 +321,9 @@ B200_KEY_METRICS = [
     "smsp__pcsamp_warps_issue_stalled_selected",
     "smsp__pcsamp_warps_issue_stalled_branch_resolving",
     "smsp__pcsamp_warps_issue_stalled_membar",
+    "smsp__pcsamp_warps_issue_stalled_tex_throttle",
+    "smsp__pcsamp_warps_issue_stalled_sleeping",
+    "smsp__pcsamp_warps_issue_stalled_misc",
 ]
 
 

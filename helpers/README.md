@@ -16,7 +16,7 @@ cd profile/<run_name>/harness/
 cp /path/to/skills/kernel-profiling/helpers/harness_template.cu my_kernel_harness.cu
 cp /path/to/skills/kernel-profiling/helpers/safetensors_loader.h .
 # edit my_kernel_harness.cu to include your kernel + fill in main()
-nvcc -O2 -std=c++17 -lineinfo -gencode=arch=compute_100,code=sm_100 \
+nvcc -O2 -std=c++17 -lineinfo -gencode=arch=compute_120,code=sm_120 \
      my_kernel_harness.cu -o my_kernel_harness
 ```
 
@@ -24,7 +24,7 @@ nvcc -O2 -std=c++17 -lineinfo -gencode=arch=compute_100,code=sm_100 \
 
 | File | Purpose |
 |---|---|
-| `ncu_utils.py` | Shared helpers: `load_report`, `safe`, `per_pc_values`, `B200_KEY_METRICS`, `rule_speedups`, ... |
+| `ncu_utils.py` | Shared helpers: `load_report`, `safe`, `per_pc_values`, `RTX5090_KEY_METRICS`, `rule_speedups`, ... |
 | `analyze_reports.py` | Extract key metrics + side-by-side comparison from one or more `.ncu-rep`s |
 | `extract_stall_hotspots.py` | Aggregate per-PC stall samples → per-source-line rankings (requires source-level report) |
 | `plot_timeline.py` | ASCII plot PM sampling timelines (reveals tail effect, pipeline bubbles) |
@@ -62,5 +62,5 @@ All three scripts take `--run-dir` and write under `<run-dir>/analysis/`.
 `ncu_utils.py` tries to auto-locate `ncu_report` from common CUDA install paths. If that fails, set `PYTHONPATH`:
 
 ```bash
-export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.1.0/extras/python
+export PYTHONPATH=$PYTHONPATH:/usr/local/cuda/nsight-compute/extras/python
 ```

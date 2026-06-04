@@ -36,7 +36,7 @@ The skill is self-contained: reference docs, reusable helper scripts (harness te
 │   ├── 05-analysis-dimensions.md     ← six analysis dimensions
 │   ├── 06-diagnosis-playbook.md      ← pattern → cause → fix
 │   ├── 07-report-template.md         ← final report structure
-│   ├── 08-b200-metric-names.md       ← sm_120 metric name reference (file rename pending Session 2)
+│   ├── 08-rtx5090-metric-names.md    ← sm_120 metric name reference
 │   └── 09-common-issues.md           ← permissions, PM sampling, JIT toolchains, etc.
 └── blackwell-cuda-programming.md     ← companion reference: Blackwell programming principles
 ```
@@ -109,7 +109,7 @@ The Python helpers work standalone for any `.ncu-rep` you have:
 
 ```bash
 # Make sure ncu_report is importable (the helpers try common paths automatically)
-export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python
+export PYTHONPATH=$PYTHONPATH:/usr/local/cuda/nsight-compute/extras/python
 
 # Create a run directory
 export RUN=/path/to/your/profile/myrun
@@ -146,7 +146,7 @@ The C++ harness template + safetensors loader live under `helpers/`; copy them i
 - The `ncu_report` Python module (ships with Nsight Compute under `extras/python/`)
 - An NVIDIA GPU with permission to access performance counters (see `reference/09-common-issues.md` if `ncu` reports `ERR_NVGPUCTRPERM`)
 
-The skill is optimized for RTX 5090 / sm_120 metric names, but the workflow and helpers work on any CUDA GPU Nsight Compute supports. Metric names may differ on other GPUs (A100, H100) — see `reference/08-b200-metric-names.md` (file rename pending Session 2) for guidance.
+The skill is optimized for RTX 5090 / sm_120 metric names, but the workflow and helpers work on any CUDA GPU Nsight Compute supports. Metric names may differ on other GPUs (A100, H100) — see `reference/08-rtx5090-metric-names.md` for guidance.
 
 ---
 

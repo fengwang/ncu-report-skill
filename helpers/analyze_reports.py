@@ -3,7 +3,7 @@
 
 Produces in `<run_dir>/analysis/`:
     metrics_all_<tag>.json    — every metric, archival
-    metrics_key_<tag>.txt/json — curated B200-compatible key metrics
+    metrics_key_<tag>.txt/json — curated RTX 5090 key metrics
     compare_<tag1>_vs_<tag2>.txt (when >= 2 reports given) — side-by-side
 
 Usage examples:
@@ -27,8 +27,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from ncu_utils import (  # noqa: E402
-    B200_KEY_METRICS, dump_all_metrics, load_action, safe,
+    RTX5090_KEY_METRICS, dump_all_metrics, load_action, safe,
 )
+
+# RTX 5090 peak throughput reference values (from PRD §4.2–4.3)
+RTX5090_PEAK_BW_GBS = 1792
+RTX5090_PEAK_FP32_TFLOPS = 104.8
+RTX5090_PEAK_BF16_TFLOPS = 209.51
 
 
 def collect(report_path: Path, tag: str, analysis_dir: Path) -> dict:
@@ -40,14 +45,17 @@ def collect(report_path: Path, tag: str, analysis_dir: Path) -> dict:
     print(f"  -> metrics_all_{tag}.json ({n} metrics)")
 
     # Curated key metrics
-    key = {m: safe(action, m) for m in B200_KEY_METRICS}
+    key = {m: safe(action, m) for m in RTX5090_KEY_METRICS}
     key["__kernel_name__"] = action.name()
 
     (analysis_dir / f"metrics_key_{tag}.json").write_text(
         json.dumps(key, indent=2, default=str)
     )
     with open(analysis_dir / f"metrics_key_{tag}.txt", "w") as f:
-        f.write(f"===== {tag} =====\nKernel: {action.name()}\n\n")
+        f.write(f"===== {tag} =====\nKernel: {action.name()}\n")
+        f.write(f"RTX 5090 peaks: {RTX5090_PEAK_BW_GBS} GB/s BW, "
+                f"{RTX5090_PEAK_FP32_TFLOPS} TFLOPS FP32, "
+                f"{RTX5090_PEAK_BF16_TFLOPS} TFLOPS BF16\n\n")
         for m, v in key.items():
             if m.startswith("__"):
                 continue
@@ -67,7 +75,7 @@ def compare(collected: dict, analysis_dir: Path):
         for t in tags:
             f.write(f"{t:>{col_w}}")
         f.write("\n" + "-" * (95 + col_w * len(tags)) + "\n")
-        for m in B200_KEY_METRICS:
+        for m in RTX5090_KEY_METRICS:
             f.write(f"{m:<95}")
             for t in tags:
                 v = collected[t].get(m, "N/A")

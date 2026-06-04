@@ -1,43 +1,44 @@
 # Session Handoff
 
 ## State Snapshot
-- Session: 2 (Reference Docs & Diagnosis Framework)
+- Session: 3 (Helpers & Code Adaptation)
 - Branch: fea/5090
-- Last commit: dd680e0 (Session 1); Session 2 changes uncommitted
-- Changed files: All 10 files in reference/ (08-b200-metric-names.md renamed to 08-rtx5090-metric-names.md)
-- Checks run: All 8 deterministic checks from session contract; sharded review (correctness, architecture, performance); adversarial verification
-- Checks not run: Actual metric name validation on sm_120 hardware (Session 3); helper script updates (Session 3); end-to-end profiling (Session 4)
-- Current status: Session 2 done condition satisfied. Awaiting commit.
+- Last commit: 6193264 (Session 2); Session 3 changes uncommitted
+- Changed files: helpers/ncu_utils.py, helpers/analyze_reports.py, helpers/plot_timeline.py, helpers/harness_template.cu, helpers/README.md, SKILL.md, README.md
+- Checks run: All 5 deterministic checks from session contract; sharded review (correctness, architecture, tests); adversarial verification; hardware metric validation on local RTX 5090
+- Checks not run: End-to-end profiling workflow (Session 4); analyze_reports.py against a real ncu report; reference doc consistency with new DRAM metric names
+- Current status: Session 3 done condition satisfied. Awaiting commit.
 
 ## Narrative Context
-Session 2 updated all 10 reference documents from B200/sm_100 to RTX 5090/sm_120. The six-dimension analysis framework was recalibrated for 170 SMs, 48 warps/SM, 24 blocks/SM, 100 KB shared/SM, and ~1.8 TB/s DRAM bandwidth. The diagnosis playbook's 14 existing patterns (A-N) were recalibrated, data-center-only ISA references (tcgen05/wgmma/TMEM) replaced with sm_120-available ISA (cp.async/mma.sync/WMMA), and three new LLM-specific patterns added (O: decode bandwidth ceiling, P: KV-cache thrashing, Q: quantization mismatch). The metric names file was renamed from B200 to RTX 5090 with all metrics flagged as "unverified on sm_120". Phase 2.5 was added to the workflow for profiling framework kernels without source access. Consumer GPU-specific troubleshooting was added to the common issues document. All cross-references were updated from numbered "Blackwell principle N" format to named section headings matching Session 1's restructured programming guide.
+Session 3 validated the curated metric list against actual RTX 5090 ncu output (2,383 metrics extracted). 93/100 metrics present — the 7 missing were DRAM metrics renamed from `dram__bytes_read` to `dram__bytes_op_read` (same pattern for write/sectors). The curated list was renamed from `B200_KEY_METRICS` to `RTX5090_KEY_METRICS` with all 7 DRAM names corrected and 3 pcsamp stall metrics added for completeness (103 total). PM sampling metrics on sm_120 are entirely different from sm_100 — stall-breakdown timeseries don't exist, replaced with hardware-counter timeseries. All 5 evidence gaps resolved with hardware experiments: G-1 (max shared mem = 96 KB opt-in), G-2 (93% metric compatibility), G-5 (no TMEM on consumer Blackwell), G-6 (ncu_report is a system package), G-8 (all carveout options accepted).
 
 ## Decision Log
 | Decision | Chosen | Rejected | Reason | Contract Ref |
 |---|---|---|---|---|
-| LLM pattern IDs | O, P, Q (append) | I, J, K (replace existing) | Existing I-N patterns already assigned; renumbering would break continuity | Session plan collision |
-| DC-only ISA in fix directions | Replace with sm_120 ISA | Remove entirely, Keep annotated | Keeps fix directions actionable for RTX 5090 | Session 1 discovery |
-| Framework guidance placement | New Phase 2.5 | Expand Phase 2, Appendix | Most discoverable position in workflow | Session plan §3 |
-| Cross-reference format | Named section headings | Remove, Keep numbered | More robust against future restructures | Session 1 restructure |
-| Pattern Q table header | "TFLOPS/TOPS" with per-row annotations | "Dense TFLOPS/TOPS" | FP4 row is sparse; mixed column header was misleading | Sharded review finding |
+| Metric list variable name | RTX5090_KEY_METRICS | SM120_KEY_METRICS, KEY_METRICS | Product-name clarity, user brainstorming choice | Session 3 brainstorming |
+| Blast radius for SKILL.md/README.md | Expand for filename fix only | Defer to Session 4 | Stale links to renamed file; cosmetic but user-visible | User decision during brainstorming |
+| PM sampling metrics | Replace with sm_120 hardware-counter timeseries | Keep old names (would all show "no data") | Old stall-breakdown timeseries don't exist on sm_120 | G-2 validation |
+| ncu_report discovery | Keep fallback + fix for package dirs | Remove fallback entirely | Other installations may not have system package | Design D2 |
+| Test kernel for validation | Temp kernel in /tmp | Make harness compilable | Harness is a user template; temp kernel is ephemeral | User decision during brainstorming |
 
 ## Next Priority Queue
-1. **Session 3: Helper scripts + metric validation** — Update helpers/ncu_utils.py (rename B200_KEY_METRICS), validate metric names against local RTX 5090 ncu output using `action.metric_names()`.
-2. **Session 4: End-to-end validation** — Run the full profiling workflow on the local RTX 5090 (harness → compile → collect → parse → diagnose → report).
+1. **Session 4: End-to-end validation** — Run the full profiling workflow on the local RTX 5090 (harness → compile → collect → parse → diagnose → report).
+2. **CRITICAL: Fix old DRAM metric names in reference docs** — 10+ files still use `dram__bytes_read.sum` instead of `dram__bytes_op_read.sum`. These will cause silent `None` returns. Affected files listed in sharded review findings C-1, C-2.
+3. **Fix PM sampling metric names in reference docs** — `reference/08-rtx5090-metric-names.md` and `reference/04-python-api.md` still list old stall-breakdown PM sampling metrics.
 
 ## Warnings And Gotchas
-- Environment issues: None. RTX 5090 + CUDA 13.2 + ncu 2026.2 all confirmed working.
-- Known failing tests: None (no test suite exists for the skill itself).
+- Environment issues: ncu_report system package has a broken symlink for `libnvperf_host.so` that was manually fixed by the user. If the system is reinstalled, this may need re-fixing.
+- Known failing tests: None (no test suite exists).
 - Deferred risks:
-  - All metric names in `08-rtx5090-metric-names.md` are carried forward from the prior Blackwell baseline and flagged as "unverified on sm_120". Session 3 MUST validate these against actual ncu output.
-  - The `helpers/ncu_utils.py` still references `B200_KEY_METRICS` — Session 3 must rename this.
-  - Session contract YAML (`docs/session_2_contract.yaml`) deterministic check references "Pattern I|J|K" but actual LLM patterns are O/P/Q. The contract YAML is informational only (the actual patterns are correct in the deliverable).
-  - SKILL.md and README.md still contain file-path references to `08-b200-metric-names.md` (annotated with "file rename pending Session 2" from Session 1). These files are outside Session 2's blast radius — Session 3 should update these references.
-  - The comparison table in `blackwell-cuda-programming.md` Architecture Overview contains data-center Blackwell numbers (228 KB shared, 192 GB memory, 8 TB/s bandwidth) in the "Data-Center Blackwell" comparison column. Project contract M-4 grep will match these. A decision is needed in a future session on whether to keep the comparison table.
-- Files future sessions must not casually edit: All 10 reference files are now self-consistent for RTX 5090. Any edits must maintain this consistency, especially the diagnosis playbook thresholds and cross-references.
+  - **HIGH**: Old DRAM metric names (`dram__bytes_read`, `dram__bytes_write`, `dram__sectors_read`, `dram__sectors_write`) persist in 10+ reference/doc files. Session 4 MUST fix these — users following the docs will get `None` on RTX 5090. Full list: `reference/01-workflow.md:215`, `reference/03-collection.md:111`, `reference/04-python-api.md:44,221`, `reference/05-analysis-dimensions.md:230-233,261`, `reference/06-diagnosis-playbook.md:130,331,362`, `reference/07-report-template.md:68`, `reference/09-common-issues.md:230`, `blackwell-cuda-programming.md:316-317`, `SKILL.md:85`.
+  - **MEDIUM**: PM sampling metric names in `reference/08-rtx5090-metric-names.md:187-200` and `reference/04-python-api.md:77` still list old stall-breakdown timeseries that don't exist on sm_120.
+  - **LOW**: `load_action()` in ncu_utils.py discards the report object, risking premature GC. Pre-existing bug, not Session 3 scope.
+  - The "unverified on sm_120" caveat in `reference/08-rtx5090-metric-names.md` header can now be removed (Session 3 validated 93%).
+- Files future sessions must not casually edit: All 5 helper scripts are now self-consistent for RTX 5090/sm_120. The DRAM metric names (`_op_` infix) and PM sampling metrics are validated. Any edits must maintain this consistency.
 
 ## Eval Seeds
-- Missed check: The session contract deterministic checks reference "Pattern I|J|K" but the actual patterns are O/P/Q. Future contracts should be updated when brainstorming changes the plan.
-- New regression test candidate: `grep -rci 'sm_100\|B200\|b200' reference/ | grep -v ':0$'` — should return empty after all sessions.
-- New regression test candidate: `grep -c 'Pattern O\|Pattern P\|Pattern Q' reference/06-diagnosis-playbook.md` — should return >= 3.
-- Instruction update candidate: Session 2 discovered that SKILL.md and README.md still reference `08-b200-metric-names.md` by filename. These are outside the session 2 blast radius but need updating. Session 3 should include this in its scope.
+- Missed check: The DRAM metric rename (`dram__bytes_read` → `dram__bytes_op_read`) was discovered during hardware validation but was not anticipated in the session plan or contract. Future contracts should include "diff DRAM metric names" as an explicit validation step.
+- New regression test candidate: `grep -c 'dram__bytes_op_read\|dram__bytes_op_write' helpers/ncu_utils.py` — should return >= 2 (confirms sm_120 DRAM names are used).
+- New regression test candidate: `python3 -c "from ncu_utils import RTX5090_KEY_METRICS; assert len(RTX5090_KEY_METRICS) >= 100"` — confirms metric list exists and has expected size.
+- Instruction update candidate: Session 3 discovered that PM sampling metrics on sm_120 are completely different from sm_100 (hardware-counter timeseries vs stall-breakdown). This was not anticipated in the session plan. Future plans should explicitly scope PM sampling metric validation.
+- Instruction update candidate: The `ncu_report` module can be installed as a system Python package (not just under CUDA extras/python). Discovery logic should check for both installation styles.

@@ -24,22 +24,19 @@ sys.path.insert(0, str(HERE))
 from ncu_utils import load_action, per_instance_values  # noqa: E402
 
 
-# Default metric list — stall-reason timelines are the most reliable.
-# SM / DRAM throughput `pmsampling:` variants may return empty instance arrays
-# depending on ncu version / driver / GPU; we include them here and let the
-# plotter show "no data" for any that don't populate on a given report.
+# Default metric list — validated against RTX 5090 / sm_120 with ncu 2026.2.
+# sm_120 PM sampling provides hardware-counter timeseries rather than the
+# per-stall-reason breakdowns available on earlier architectures. The plotter
+# shows "no data" for any metric that doesn't populate on a given report.
 DEFAULT_METRICS = [
-    "pmsampling:smsp__warps_issue_stalled_long_scoreboard.avg",
-    "pmsampling:smsp__warps_issue_stalled_short_scoreboard.avg",
-    "pmsampling:smsp__warps_issue_stalled_wait.avg",
-    "pmsampling:smsp__warps_issue_stalled_dispatch_stall.avg",
-    "pmsampling:smsp__warps_issue_stalled_math_pipe_throttle.avg",
-    "pmsampling:smsp__warps_issue_stalled_mio_throttle.avg",
-    # These may or may not populate depending on ncu version / driver / GPU — the plotter prints "no data" when empty.
-    "pmsampling:sm__throughput.avg.pct_of_peak_sustained_elapsed",
-    "pmsampling:sm__warps_active.avg.pct_of_peak_sustained_active",
-    "pmsampling:dram__throughput.avg.pct_of_peak_sustained_elapsed",
-    "pmsampling:l1tex__throughput.avg.pct_of_peak_sustained_active",
+    "pmsampling:smsp__warps_active.sum",
+    "pmsampling:dram__bytes.avg.pct_of_peak_sustained_elapsed",
+    "pmsampling:dram__bytes.sum.per_second",
+    "pmsampling:l1tex__data_pipe_lsu_wavefronts.avg.pct_of_peak_sustained_elapsed",
+    "pmsampling:sm__inst_executed_pipe_alu_size_64b_realtime.avg.pct_of_peak_sustained_elapsed",
+    "pmsampling:sm__pipe_fma_cycles_active_realtime.avg.pct_of_peak_sustained_elapsed",
+    "pmsampling:pcie__throughput.avg.pct_of_peak_sustained_elapsed",
+    "pmsampling:gpc__cycles_elapsed.avg.per_second",
 ]
 
 

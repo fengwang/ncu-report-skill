@@ -7,7 +7,7 @@
 //
 // Compile with:
 //     nvcc -O2 -std=c++17 -lineinfo \
-//          -gencode=arch=compute_100,code=sm_100 \
+//          -gencode=arch=compute_120,code=sm_120 \
 //          my_kernel_harness.cu -o my_kernel_harness
 //
 // Usage modes this template supports:

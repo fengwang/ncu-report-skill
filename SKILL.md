@@ -53,7 +53,7 @@ Most under-performing CUDA kernels are under-performing for exactly one reason t
 | [`reference/05-analysis-dimensions.md`](reference/05-analysis-dimensions.md) | Six analysis dimensions: occupancy, balance, stalls, tensor core, timeline, memory |
 | [`reference/06-diagnosis-playbook.md`](reference/06-diagnosis-playbook.md) | Pattern → diagnosis → fix. Merges Blackwell programming principles with NCU signals |
 | [`reference/07-report-template.md`](reference/07-report-template.md) | How to structure the final report |
-| [`reference/08-b200-metric-names.md`](reference/08-b200-metric-names.md) | sm_120 metric names vs older GPUs — many common names are different (file rename pending Session 2) |
+| [`reference/08-rtx5090-metric-names.md`](reference/08-rtx5090-metric-names.md) | sm_120 metric names vs older GPUs — many common names are different |
 | [`reference/09-common-issues.md`](reference/09-common-issues.md) | Permissions, PM sampling gaps, TVM-FFI / PyTorch gotchas |
 
 ### Helpers (reusable code)
@@ -72,7 +72,7 @@ Most under-performing CUDA kernels are under-performing for exactly one reason t
 
 ## Critical lessons (don't skip)
 
-1. **The stock `ncu_profile_skill.md` metric names don't all work on RTX 5090.** Names like `smsp__inst_executed_op_global_ld.sum`, `dram__bytes.sum`, `l1tex__average_t_sectors_per_request*.ratio` return `None` on sm_120. Use the sm_120-compatible names in [`reference/08-b200-metric-names.md`](reference/08-b200-metric-names.md) (file rename pending Session 2) or enumerate via `action.metric_names()`.
+1. **The stock `ncu_profile_skill.md` metric names don't all work on RTX 5090.** Names like `smsp__inst_executed_op_global_ld.sum`, `dram__bytes.sum`, `l1tex__average_t_sectors_per_request*.ratio` return `None` on sm_120. Use the sm_120-compatible names in [`reference/08-rtx5090-metric-names.md`](reference/08-rtx5090-metric-names.md) or enumerate via `action.metric_names()`.
 
 2. **Always compile with `-lineinfo`.** Without it, ncu's source view is blank and you cannot do per-line stall analysis. If you can't add `-lineinfo` to the build system (TVM-FFI, PyTorch inline, JIT), **build a standalone harness** — that's the whole point.
 
