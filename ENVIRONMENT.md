@@ -4,6 +4,6 @@
     + should deliver a docker container for system independent build and test setting
 
 - The Development environment is an ArchLinux system with the following CUDA software installed:
-    + CUDA 13.2
+    + CUDA 13.3
     + NVIDIA Nsight Compute
 

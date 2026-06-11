@@ -55,6 +55,8 @@ last_wave_utilization_pct = last_wave_blocks / wave_size * 100
 
 **Helper:** `analyze_reports.py` prints all the key launch metrics under "Launch geometry" in the output txt.
 
+**Tile kernel note:** The tile compiler chooses `launch__block_size` automatically (e.g., 128 for element-wise, 256 for GEMM). You cannot tune it directly. Use `[[cutile::hint(0, occupancy=N)]]` on the function declaration to guide the compiler. `launch__occupancy_limit_warps` still reflects the effective ceiling. On RTX 5090 validation, tile vector_add showed `launch__block_size=128` and `launch__occupancy_limit_warps=12` — the occupancy ceiling is compiler-determined but the same metrics apply.
+
 ---
 
 ## Dimension 2 — Thread-block balance (tail effect)
@@ -104,6 +106,8 @@ print(f"max/avg = {max(work_per_cta)/avg:.2f}x, max/min = {max(work_per_cta)/min
 ```
 
 Ratios > 5x indicate significant potential for tail effect.
+
+**Tile kernel note:** Tail effects apply identically to tile kernels — they still launch with a grid of blocks, and the last wave can be partially filled. The same per-SM active-cycle distribution metrics are meaningful. Tile kernels with `partition_view` + `load_masked` handle boundary blocks gracefully, but the scheduling imbalance remains.
 
 ---
 
@@ -165,6 +169,8 @@ smsp__pcsamp_warps_issue_stalled_selected                  # productive cycles
 
 **Helper:** `extract_stall_hotspots.py` produces `stall_hotspots_<tag>.txt` which ranks source lines by total stall samples. This directly points at the offending `LDG`, `BAR.SYNC`, or compute op in source.
 
+**Tile kernel note:** The same stall metrics work for tile kernels with the same naming pattern. Key differences from SIMT: (1) `branch_resolving` is near zero — the compiler eliminates warp divergence; (2) `sleeping` stall appears in compute-heavy tile kernels (GEMM) where the compiler manages warp yield/resume; (3) `barrier` stalls come from compiler-generated intra-block synchronization for reductions (`ct::sum`), not from explicit `__syncthreads()`. Per-PC (`pcsamp`) stall metrics also work, but source-line mapping may be less precise because the compiler heavily transforms tile code.
+
 ---
 
 ## Dimension 4 — Tensor Core utilization
@@ -190,6 +196,8 @@ sm__ops_path_tensor_op_hmma_src_bf16_dst_fp32_sparsity_off.avg       # BF16×BF1
 **RTX 5090 note:** sm_120 uses 5th-gen tensor cores accessed via `mma.sync` PTX or the WMMA C++ API. The data-center Blackwell ISA (`tcgen05.mma`, `wgmma`, TMEM) is **not available** on sm_120. Most projects should use CUTLASS 4.x / cuBLAS instead of hand-rolling. See `../blackwell-cuda-programming.md` § Tensor Core Programming.
 
 **Fix direction:** if you see 0% and the workload is matrix-multiplication-shaped, redesign around MMA. This is usually a major refactor but gives 2-10× on compute-bound paths.
+
+**Tile kernel note:** `ct::mma()` maps to the same tensor core hardware metrics as manual mma.sync. On RTX 5090, tile GEMM (FP16→FP32) showed `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active = 28.5%` and `sm__inst_executed_pipe_tensor_subpipe_hmma = 13.9%`. The metric `sm__ops_path_tensor_op_hmma_src_fp16_dst_fp32_sparsity_off.sum` reports total tensor ops and should match the expected M×N×K×2 FLOPs. If tensor utilization is low for a `ct::mma` kernel, check tile dimensions alignment with hardware MMA shapes and add `ct::irange()` + latency hints.
 
 ---
 
@@ -217,6 +225,8 @@ pmsampling:smsp__warps_issue_stalled_short_scoreboard.avg
 **Helper:** `plot_timeline.py` — renders ASCII plots. Look at multiple series side-by-side (SM throughput + DRAM throughput + long_scoreboard stalls) to distinguish the shapes.
 
 **Note:** PM sampling has ~2µs interval on RTX 5090. Very short kernels (< 20 µs) produce few samples — interpret with care.
+
+**Tile kernel note:** PM sampling works for tile kernels — `pmsampling:smsp__warps_active.sum` and other time-series metrics return valid data. The timeline shapes are the same (flat high, tail, sawtooth). One difference: tile kernels may show a more pronounced warmup phase because the compiler generates a prologue for shared memory staging.
 
 ---
 
@@ -281,6 +291,8 @@ OPT   Est. Speedup: 10.8%
 - AoS → SoA: restructure the data.
 - Sparse writes: pack writes into a single coalesced store at the end of the warp.
 - Register spill: add `__launch_bounds__`, reduce intermediate variables, or split kernel.
+
+**Tile kernel note:** The tile compiler auto-stages global memory through shared memory, so `smsp__sass_inst_executed_op_shared.sum > 0` is expected even if your tile code has no explicit shared memory. `l1tex__data_pipe_lsu_wavefronts_mem_shared.sum` reflects compiler-generated staging traffic. Coalescing quality depends on whether you use partition_view (structured, compiler-optimized) or gather (pointer arithmetic, potentially irregular). On RTX 5090 validation, both tile and SIMT versions of vector_add had identical `l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum` (262144) — the compiler achieves the same sector efficiency through its staging strategy.
 
 ---
 

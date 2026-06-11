@@ -427,6 +427,72 @@ Using FP16 when FP8 is viable means 2× less compute throughput and no bandwidth
 
 ---
 
+## Tile Kernel Diagnosis Patterns (CUDA 13.3+)
+
+The following patterns apply to tile kernels (`__tile_global__`, `cuda::tiles`). They complement the SIMT patterns above — both sets can coexist in a single report if the application mixes tile and SIMT kernels.
+
+### Pattern R — Tile Kernel Low Occupancy
+
+**Signal:** `sm__warps_active.avg.pct_of_peak_sustained_active` is below 50% on a tile kernel. `launch__occupancy_limit_warps` shows a low ceiling despite hardware supporting 48 warps/SM.
+
+**Cause:** The tile compiler chose a block size (visible in `launch__block_size`) that limits occupancy. This happens when:
+- The tile shape is large, forcing the compiler to allocate more registers per block
+- The partition_view shape creates blocks with high shared memory footprint
+- The default occupancy target is too conservative for the workload
+
+**Fix:**
+1. Add `[[cutile::hint(0, occupancy=N)]]` on the `__tile_global__` function declaration to guide the compiler toward N concurrent blocks per SM.
+2. Reduce tile shape dimensions (smaller tiles → fewer registers → more blocks).
+3. Check `launch__block_size` — if the compiler chose a large block size, the tile shape may be unnecessarily wide.
+
+**Validated on RTX 5090:** Element-wise tile kernel had `sm__warps_active.avg.pct = 46.8%` with compiler-chosen 128 threads/block and `launch__occupancy_limit_warps = 12`. The occupancy hint can increase this.
+
+### Pattern S — Partition_view vs Gather Memory Inefficiency
+
+**Signal:** High `l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum` relative to data volume, or high `long_scoreboard` stall ratio despite regular access patterns.
+
+**Cause:** Using gather/scatter (pointer arithmetic + `ct::load()`) where partition_view would enable structured, TMA-eligible access. Gather produces independent per-element loads that may not coalesce optimally.
+
+**Fix:**
+1. Restructure data layout to enable `partition_view` (contiguous, regularly strided).
+2. Add `ct::assume_aligned(ptr, 16_ic)` to enable TMA lowering.
+3. Use `load_masked`/`store_masked` for boundary safety instead of manual index clamping.
+
+**Note:** A direct partition_view vs gather ncu comparison was not profiled in this session. The guidance to prefer partition_view is based on NVIDIA documentation (partition_view enables structured/TMA-eligible access) and the general principle that structured access patterns allow more compiler optimization. Add a gather-path tile kernel ncu run to quantify the specific trade-off on sm_120.
+
+### Pattern T — Tile MMA Underutilization
+
+**Signal:** `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active` is below 20% in a `ct::mma()` kernel.
+
+**Cause:**
+- Tile dimensions don't align with hardware MMA shape (tensor cores operate on fixed tile sizes)
+- Insufficient K-dimension depth — loop body too small to keep the tensor pipe fed
+- Missing optimization hints causing the compiler to generate suboptimal scheduling
+
+**Fix:**
+1. Check tile shape matches hardware MMA dimensions: for FP16→FP32, use shapes that are multiples of 16 (M, N) and 16 (K).
+2. Add `[[cutile::hint(0, latency=5)]]` on the load statements feeding `ct::mma()` to guide prefetching.
+3. Use `ct::irange()` for the K-loop to enable compiler loop pipelining.
+4. Add `ct::assume_divisible(K, 16_ic)` to eliminate boundary checks in the inner loop.
+
+**Validated on RTX 5090:** Tile GEMM (32×64×64 tiles, FP16→FP32) achieved `sm__pipe_tensor_cycles_active.avg.pct = 28.5%` and `sm__inst_executed_pipe_tensor_subpipe_hmma.avg.pct = 13.9%` with `ct::irange()` and latency hints. Top stall was `sleeping` (4.6) indicating the compiler is managing warp yield/resume around tensor ops.
+
+### Pattern U — Tile Atomic Contention
+
+**Signal:** `lts__d_atomic_input_cycles_active.max.pct_of_peak_sustained_elapsed` exceeds 20%, or `smsp__average_warps_issue_stalled_mio_throttle_per_issue_active.ratio` exceeds 5.0 in a tile kernel using `ct::atomic_add`.
+
+**Cause:** Many blocks performing device-scope atomics on the same address (e.g., global reduction via `ct::atomic_add` with `thread_scope_device_t`).
+
+**Fix:**
+1. Use `ct::sum(tile, dim)` for intra-block reduction first, then a single `ct::atomic_add` per block for the cross-block accumulation.
+2. If contention is severe, use a two-stage approach: first-stage tile kernel writes partial results to an array (one per block), second-stage kernel reduces the partials.
+3. Check `l1tex__t_sectors_pipe_lsu_mem_global_op_atom.sum` — this should equal the block count for optimal single-atomic-per-block patterns.
+4. If atomic count >> grid size, the tile code is performing per-element atomics instead of per-block — restructure to reduce first.
+
+**Validated on RTX 5090:** Tile reduction (1M elements, 4096 blocks, single atomic per block) showed `lts__d_atomic_input_cycles_active.max.pct = 29.2%`, `barrier` stall ratio = 9.1 (from intra-block `ct::sum`), `mio_throttle` stall ratio = 7.9 (from memory ordering). Atomic sector count = 4096 (matches block count — one atomic per block, optimal pattern).
+
+---
+
 ## Single-User Decode Optimization Checklist (RTX 5090)
 
 A step-by-step checklist for optimizing single-token autoregressive decode kernels on RTX 5090. Work through all three phases in order. Each step specifies the ncu metric to check, the RTX 5090-calibrated threshold, and what to do if the check fails.

@@ -84,6 +84,8 @@ Most under-performing CUDA kernels are under-performing for exactly one reason t
 
 6. **Don't delegate understanding.** Run the profiles yourself, open the reports, cite specific metric values. Never write "the profile shows it's memory-bound" — instead, name the two or three metric values that back your conclusion (e.g., "`dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed` well under 10%, and `long_scoreboard` stalls dominate the pcsamp histogram, so the kernel is **latency-bound on L1**, not DRAM-bandwidth-bound"). Fill in the actual numbers from your report. Specificity is the deliverable.
 
+7. **Tile kernels (CUDA 13.3+) are fully supported.** The skill covers both SIMT (`__global__`) and tile (`__tile_global__`) kernels. Tile kernels require `nvcc --enable-tile -std=c++20` to compile. ncu produces the same full metric set for tile kernels — all six analysis dimensions apply. See `blackwell-cuda-programming.md` § Tile Kernel Programming Model and diagnosis patterns R–U in `reference/06-diagnosis-playbook.md`. Key difference: the compiler chooses block size and manages shared memory staging automatically; occupancy tuning uses hints, not launch configuration.
+
 ---
 
 ## Related skills

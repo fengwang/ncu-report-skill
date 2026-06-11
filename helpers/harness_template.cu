@@ -86,7 +86,44 @@ static void fill_f32_random(std::vector<float>& h, uint64_t seed, float scale = 
 //     template __global__ void my_kernel<128, 64>(const float*, const float*, float*, int, int, int);
 // ============================================================================
 
-// ... your kernel goes here ...
+// ... your SIMT kernel goes here ...
+
+// ============================================================================
+// Tile kernel variant (CUDA 13.3+)
+//
+// Enable this section by changing #if 0 to #if 1.
+// Compile with: nvcc -std=c++20 -arch=sm_120 --enable-tile -lineinfo -O3
+// ============================================================================
+#if 0
+#include <cuda_tile.h>
+
+__tile_global__ void my_tile_kernel(float* __restrict__ out,
+                                    const float* __restrict__ in,
+                                    std::size_t n) {
+    namespace ct = cuda::tiles;
+    using namespace ct::literals;
+
+    in  = ct::assume_aligned(in, 16_ic);
+    out = ct::assume_aligned(out, 16_ic);
+
+    auto in_view  = ct::partition_view{ct::tensor_span{in, ct::extents{n}},
+                                       ct::shape{256_ic}};
+    auto out_view = ct::partition_view{ct::tensor_span{out, ct::extents{n}},
+                                       ct::shape{256_ic}};
+
+    auto bid = ct::bid().x;
+    auto tile = in_view.load_masked(bid);
+    // ... your tile computation here ...
+    out_view.store_masked(tile, bid);
+}
+
+static void launch_tile_kernel(float* out, const float* in, int N) {
+    int blocks = (N + 256 - 1) / 256;
+    my_tile_kernel<<<blocks>>>(out, in, (std::size_t)N);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+#endif
 
 // ============================================================================
 // TODO(you): launch helper

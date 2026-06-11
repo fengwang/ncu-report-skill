@@ -85,6 +85,18 @@ export HOME=/some/writable/dir   # or just use your normal $HOME
 
 Either way, **make sure `-lineinfo` is in the nvcc command**. Without it, source-level analysis won't work.
 
+**Tile kernel variant (CUDA 13.3+):** If the kernel uses `__tile_global__` / `cuda::tiles`, the compilation command changes:
+```bash
+nvcc -std=c++20 -arch=sm_120 --enable-tile -lineinfo -O3 -o my_tile_kernel my_tile_kernel.cu
+```
+Critical differences from SIMT:
+- `--enable-tile` is **required** — without it, tile annotations are silently ignored and the kernel compiles as an empty stub
+- `-std=c++20` is required (tile API uses C++20 concepts)
+- Launch syntax: `kernel<<<grid>>>()` (single chevron argument, no threads-per-block)
+- The compiler chooses the thread count per block — you cannot control it directly
+
+See `blackwell-cuda-programming.md` § Tile Kernel Programming Model for the full API reference.
+
 ---
 
 ## Phase 2.5 — Framework kernel identification (when source is unavailable)
@@ -254,6 +266,8 @@ Run the pair once per (kernel, dispatch path, representative workload) combinati
 
 Each `--set full` run takes ~30-60 seconds with many replay passes. Each `--set source` run takes 5-10 seconds. Plan your time budget.
 
+**Tile kernel collection note:** The same `--set full` and `--set source` flags work for tile kernels — no special sections needed. On RTX 5090, tile kernel profiling produces 2383 metrics across 41 passes, identical to SIMT. All six analysis dimensions produce meaningful data for tile kernels.
+
 ---
 
 ## Phase 4 — Extract structured data
@@ -288,7 +302,7 @@ Work through the six analysis dimensions — see [`05-analysis-dimensions.md`](0
 
 For each dimension, write down the observed signal *and the specific metric value* that produced it. "Kernel is memory bound" is useless; something like "`dram__bytes_op_read.sum.pct_of_peak_sustained_elapsed = X%` (well below peak) shows the kernel is *not* DRAM-bandwidth-bound — the `long_scoreboard` stall rate of Y% says it's latency-bound on L1" is diagnosis. Fill in X and Y from your own report.
 
-Then consult [`06-diagnosis-playbook.md`](06-diagnosis-playbook.md) which maps observed patterns to likely causes and concrete fixes.
+Then consult [`06-diagnosis-playbook.md`](06-diagnosis-playbook.md) which maps observed patterns to likely causes and concrete fixes. **For tile kernels** (`__tile_global__`), also check the tile-specific diagnosis patterns (Patterns R–U) in the playbook, which cover tile occupancy, partition_view vs gather, ct::mma utilization, and atomic contention.
 
 ---
 

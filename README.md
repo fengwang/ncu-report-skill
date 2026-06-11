@@ -134,7 +134,7 @@ The C++ harness template + safetensors loader live under `helpers/`; copy them i
 
 ## Requirements
 
-- CUDA Toolkit with `nvcc` (tested with 13.2)
+- CUDA Toolkit with `nvcc` (tested with 13.3)
 - Nsight Compute CLI `ncu` (tested with 2026.2)
 - The `ncu_report` Python module (ships with Nsight Compute under `extras/python/`)
 - An NVIDIA GPU with permission to access performance counters (see `reference/09-common-issues.md` if `ncu` reports `ERR_NVGPUCTRPERM`)

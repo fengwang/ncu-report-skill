@@ -222,6 +222,31 @@ all_names = action.metric_names()      # all metrics collected in this report
 
 ---
 
+## Tile Kernel Metric Behavior (CUDA 13.3+)
+
+Tile kernels (`__tile_global__`) produce the same set of ncu metrics as SIMT kernels. All 2383 metrics collected by `--set full` are available. However, several metrics behave differently due to compiler-managed execution:
+
+**Metrics that behave differently:**
+
+| Metric | SIMT Behavior | Tile Behavior | Notes |
+|---|---|---|---|
+| `launch__block_size` | Programmer-specified | Compiler-chosen (e.g., 128 or 256) | Cannot be tuned directly; use `occupancy` hint |
+| `l1tex__data_pipe_lsu_wavefronts_mem_shared.sum` | 0 if no `__shared__` | Non-zero (compiler stages through shared memory) | Expected — not a bug |
+| `smsp__average_warps_issue_stalled_branch_resolving_per_issue_active.ratio` | May be significant | Near zero | Compiler eliminates warp divergence |
+| `smsp__average_warps_issue_stalled_sleeping_per_issue_active.ratio` | Rare | Common in compute-heavy tile kernels (GEMM) | Compiler manages warp yield/resume |
+| `smsp__average_warps_issue_stalled_barrier_per_issue_active.ratio` | From `__syncthreads()` | From compiler-generated sync for `ct::sum` etc. | Reductions trigger implicit barriers |
+
+**Metrics validated on tile kernels (RTX 5090, sm_120):**
+- Occupancy: `sm__warps_active.avg.pct_of_peak_sustained_active`, `launch__occupancy_limit_warps` — validated (tile vadd)
+- Stalls: All `smsp__average_warps_issue_stalled_*_per_issue_active.ratio` — validated (all three kernels)
+- Tensor core: `sm__pipe_tensor_cycles_active`, `sm__inst_executed_pipe_tensor_subpipe_hmma` — validated (tile GEMM)
+- Atomics: `l1tex__t_sectors_pipe_lsu_mem_global_op_atom.sum`, `lts__d_atomic_input_cycles_active` — validated (tile reduction)
+- PM sampling: `pmsampling:smsp__warps_active.sum` — validated (all kernels)
+- Memory: `dram__bytes_op_read.sum`, `l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum` — validated (tile vadd)
+- TMA: `device__attribute_tensor_map_access_supported = 1` — TMA hardware is present on sm_120 (whether the compiler generates TMA instructions depends on access pattern; confirmed hardware support only, not compiler lowering)
+
+---
+
 ## Gotchas
 
 1. **Metric exists in ncu's list but returns `None` from Python**: the metric wasn't *collected* in this report. Rerun ncu with the right `--section` or `--set`.

@@ -4,7 +4,7 @@ Use the Python module, not CLI output, for anything beyond a quick look. The API
 
 Module path (adjust for your CUDA version):
 ```bash
-export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python
+export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.3/nsight-compute-2026.2.0/extras/python
 python3 -c "import ncu_report; print('OK')"
 ```
 
@@ -14,7 +14,7 @@ python3 -c "import ncu_report; print('OK')"
 
 ```python
 import sys
-sys.path.insert(0, "/usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python")
+sys.path.insert(0, "/usr/local/cuda-13.3/nsight-compute-2026.2.0/extras/python")
 import ncu_report
 
 report = ncu_report.load_report("path/to/full_<tag>.ncu-rep")

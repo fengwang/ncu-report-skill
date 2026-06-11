@@ -107,8 +107,8 @@ def safe(action, name, default=None):
 
 ```bash
 find /usr/local/cuda* -name "ncu_report*" -type f 2>/dev/null
-# e.g. /usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python/ncu_report.py
-export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.2/nsight-compute-2026.2.0/extras/python
+# e.g. /usr/local/cuda-13.3/nsight-compute-2026.2.0/extras/python/ncu_report.py
+export PYTHONPATH=$PYTHONPATH:/usr/local/cuda-13.3/nsight-compute-2026.2.0/extras/python
 python3 -c "import ncu_report; print('OK')"
 ```
 
@@ -236,6 +236,68 @@ Yes, mostly. NCU's rule engine does a reasonable job estimating individual rule 
 - The sum of all `Est. Speedup`s is usually > 100%, because rules overlap (fixing A might also help B). Don't add them.
 - Rules are per-pattern; the rule engine doesn't know which one is hardest/easiest to fix in your codebase.
 - Use `Est. Speedup: X%` to rank patterns by magnitude; use your judgement for ease of implementation.
+
+---
+
+## Tile kernel issues (CUDA 13.3+)
+
+### `--enable-tile` missing — tile annotations silently ignored
+
+**Symptom:** `__tile_global__` kernel compiles but produces a warning: `"parsing for Tile constructs is not enabled. Tile annotations will be ignored."` The kernel may compile as an empty stub or behave incorrectly.
+
+**Fix:** Add `--enable-tile` to the nvcc command line:
+```bash
+nvcc -std=c++20 -arch=sm_120 --enable-tile -lineinfo -O3 -o kernel kernel.cu
+```
+This is the most common tile kernel issue. The flag is required and not implied by `-std=c++20` or `-arch=sm_120`.
+
+### Tile kernel launch with second chevron — compilation or runtime failure
+
+**Symptom:** `tile_kernel<<<grid, threads>>>()` with `threads > 1` causes a compilation error or runtime failure.
+
+**Fix:** Tile kernels must be launched with a single grid argument:
+```cpp
+tile_kernel<<<grid>>>(args...);
+// OR equivalently:
+tile_kernel<<<grid, 1>>>(args...);
+```
+The compiler manages the thread count per block — you cannot specify it. The single-arg form `<<<grid>>>` is preferred.
+
+### No cross-calling between tile and SIMT functions
+
+**Symptom:** Compilation error when a `__tile_global__` or `__tile__` function calls a `__device__` function (or vice versa).
+
+**Fix:** Tile and SIMT function spaces are separate. A `__tile__` helper cannot call `__device__` functions. Rewrite shared logic as `__tile__` functions for tile kernels. If both tile and SIMT kernels need the same logic, duplicate it (or use a template that both can instantiate, if the compiler accepts it).
+
+### Tile dimensions must be compile-time constants
+
+**Symptom:** Compilation error when using runtime values for tile shapes: `ct::shape{N}` where N is a variable.
+
+**Fix:** Use compile-time constants with the `_ic` literal suffix:
+```cpp
+ct::shape{256_ic}                     // correct
+ct::shape<256>{}                      // correct
+ct::shape{N}                          // ERROR if N is a runtime variable
+```
+All tile dimensions must be power-of-two, compile-time constants. Use `ct::integral_constant` or the `_ic` suffix from `ct::literals`.
+
+### Optimization hint placement errors
+
+**Symptom:** Compiler warning: `"tile optimization hint ignored because it does not apply to the attached entity."`
+
+**Fix:** Different hints attach to different entities:
+- **`occupancy`** — on the `__tile_global__` **function declaration**: `[[cutile::hint(0, occupancy=4)]] __tile_global__ void kernel(...)`
+- **`latency`, `allow_tma`** — on a **statement** (assignment), not a variable declaration:
+```cpp
+// WRONG — hint on a declaration
+[[cutile::hint(0, latency=5)]]
+auto tile = view.load(idx);           // warning: hint ignored
+
+// RIGHT — hint on an assignment statement
+decltype(view.load(idx)) tile;
+[[cutile::hint(0, latency=5)]]
+tile = view.load(idx);                // hint applied correctly
+```
 
 ---
 

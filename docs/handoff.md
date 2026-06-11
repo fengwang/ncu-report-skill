@@ -1,50 +1,57 @@
 # Session Handoff
 
 ## State Snapshot
-- Session: 4 (LLM Content & End-to-End Validation) — FINAL SESSION
+- Session: 5 (CUDA 13.3 Upgrade — Tile Kernel Support)
 - Branch: fea/5090
-- Last commit: bfdc164 (Session 3); Session 4 changes uncommitted
-- Changed files: .gitignore, SKILL.md, blackwell-cuda-programming.md, reference/01-workflow.md, reference/03-collection.md, reference/04-python-api.md, reference/05-analysis-dimensions.md, reference/06-diagnosis-playbook.md, reference/07-report-template.md, reference/08-rtx5090-metric-names.md, reference/09-common-issues.md
-- Checks run: All 5 deterministic checks from session contract (all pass); sharded review (correctness, security, architecture); adversarial verification (all 6 claims pass)
+- Last commit: 683ebab (Session 5 plan and contract); Session 5 changes uncommitted
+- Changed files: ENVIRONMENT.md, README.md, SKILL.md, blackwell-cuda-programming.md, helpers/harness_template.cu, reference/01-workflow.md, reference/04-python-api.md, reference/05-analysis-dimensions.md, reference/06-diagnosis-playbook.md, reference/08-rtx5090-metric-names.md, reference/09-common-issues.md (11 files, 360 insertions, 9 deletions)
+- Checks run: All 9 deterministic checks (all pass); sharded review (4 findings, all fixed); adversarial verification (8/11 pass, 2 partial, 1 confirmed — all caveated in docs)
 - Checks not run: None — all checks executed
-- Current status: Session 4 done condition satisfied. Awaiting commit.
+- Current status: Session 5 done condition satisfied. Awaiting commit.
 
 ## Narrative Context
-Session 4 completed two major workstreams: (1) LLM content finalization and (2) end-to-end validation on real RTX 5090 hardware.
+Session 5 completed two major workstreams: (1) hardware validation of tile kernels on RTX 5090 and (2) content writing grounded in validation data.
 
-**DRAM metric fix-forward:** 22 stale DRAM metric names (`dram__bytes_read` → `dram__bytes_op_read`, etc.) were corrected across 10 files. PM sampling metrics in reference/08 and reference/04 were updated to sm_120 hardware-counter equivalents. The "unverified" caveat in reference/08 was removed.
+**CUDA 13.3 version bump:** 7 references to "CUDA 13.2" / "cuda-13.2" replaced across 5 files. Zero stale references remain.
 
-**LLM content:** Four precision-specific profiling recipes (BF16, FP8, INT8, FP4) with RTX 5090 throughput values and ncu commands. Framework profiling walkthrough expanded with action mapping table (TRT-LLM, vLLM, PyTorch), VRAM budget planning, and kernel naming patterns. 16-step decode optimization checklist added to the diagnosis playbook.
+**Hardware validation (3 tile kernels):**
+- Element-wise vector_add: confirmed `--enable-tile` flag required, compiler chooses block_size=128, `partition_view` + `load_masked`/`store_masked` pattern works, SIMT vs tile metric comparison documented
+- GEMM with ct::mma (256×256×256 FP16→FP32): tensor core metrics confirmed working (`sm__pipe_tensor_cycles_active = 28.5%`), compiler chooses block_size=256
+- Reduction with ct::atomic_add: atomic metrics confirmed (`lts__d_atomic_input_cycles_active.max.pct = 29.2%`), barrier stall from ct::sum reduction
+- Hint architecture code 1200: accepted by nvcc on sm_120
+- TMA hardware: `device__attribute_tensor_map_access_supported = 1` (hardware present; compiler lowering unconfirmed)
 
-**Gap resolutions:** G-4 confirmed RTX 5090 supports cluster launches up to size 8 (data-center Blackwell supports 16). G-7 measured 1,508 GB/s effective bandwidth (84.2% of 1,792 GB/s theoretical).
-
-**End-to-end validation:** Full 6-phase workflow completed on real hardware — compile, collect (41 passes), parse (103 metrics, no not-found errors), diagnose (all six dimensions meaningful), report generated with evidence-backed findings.
+**Content:** 133-line tile kernel programming section in programming guide (API reference, decision framework, performance annotations, profiling behavior). 4 diagnosis patterns (R–U) with hardware-validated ncu metrics. 6 analysis dimension tile annotations. 5 common issues (enable-tile flag, launch syntax, cross-calling, _ic constants, hint placement). Tile variant in harness template. Tile mention in SKILL.md.
 
 ## Decision Log
 | Decision | Chosen | Rejected | Reason | Contract Ref |
 |---|---|---|---|---|
-| Blast radius for DRAM fix | Expand allowed_files | Fix only listed files; Session 3 amendment | DRAM fix is contractually required, low-risk | Brainstorming D1 |
-| Task ordering | Content first, then validate | Validate first; interleave | Validation should test the final state | Brainstorming D3 |
-| G-7 bandwidth kernel | Dedicated float4 memcpy | Reuse vector_add | More accurate measurement | Brainstorming D4 |
-| Validation kernel | Standalone vector_add | Harness template | Harness is a user template (stub); needed a working kernel | Design D4 |
-| Cluster max text | "Data-center: 16, RTX 5090: 8" | "Matches data-center maximum" | Correctness review found contradiction | Sharded review C-1 |
+| ENVIRONMENT.md blast radius | Add to allowed_files | Exclude from check | Has stale CUDA 13.2 ref, simple fix | Brainstorming D1 |
+| Validation strategy | Progressive 3-kernel | Single comprehensive; minimal+caveat | Isolates metric sources; addresses adversarial concern about trivial-only validation | Brainstorming D2 |
+| Harness template | Tile variant in existing file | Separate file; no modification | One file, both models, no new top-level files | Brainstorming D3 |
+| Task ordering | Validate first, then content | Content first; interleaved | Tile ncu behavior unknown; content must be grounded in real data | Brainstorming D4 |
+| Pattern S validation | Caveat that gather was not profiled | Fabricate comparison | Review finding F1: no gather kernel was profiled | Sharded review |
+| TMA claim scope | Hardware attribute only | Claim compiler lowering | Review finding F2: ncu TMA metrics not checked | Sharded review |
 
 ## Next Priority Queue
-1. **Commit Session 4 changes** — all work is ready to commit
-2. **Update docs/evidence_map.md** — Mark G-4 and G-7 as resolved (in docs/, outside blast radius)
-3. **Merge fea/5090 to main** — All 4 sessions complete, project-level acceptance criteria met
+1. **Commit Session 5 changes** — all work is ready to commit
+2. **Update docs/evidence_map.md** — Mark tile kernel validations as resolved (in docs/, outside blast radius)
+3. **Merge fea/5090 to main** — All 5 sessions complete, project-level acceptance criteria met
 
 ## Warnings And Gotchas
-- Environment issues: ncu_report system package has a broken symlink for `libnvperf_host.so` that was manually fixed by the user. If the system is reinstalled, this may need re-fixing.
+- Environment issues: ncu_report system package has a broken symlink for `libnvperf_host.so` (pre-existing, from Session 4).
 - Known failing tests: None (no test suite exists).
 - Deferred risks:
-  - **LOW**: `load_action()` in ncu_utils.py discards the report object, risking premature GC. Pre-existing bug, not Session 4 scope.
-  - **LOW**: TFLOPS peaks are repeated in precision recipes and earlier roofline table in blackwell-cuda-programming.md. Intentional for recipe self-containment.
-  - The validation artifacts in `profile/validation_run/` are gitignored and should not be committed. They can be regenerated by following the REPORT.md reproduction instructions.
+  - **MEDIUM**: Pattern S (partition_view vs gather) diagnosis pattern is not hardware-validated. The advice is directionally correct but the specific metric trade-off is not quantified. A future session could add a gather-path tile kernel ncu comparison.
+  - **MEDIUM**: TMA compiler lowering on sm_120 is not confirmed via ncu metrics. Hardware attribute is present; actual TMA instruction generation depends on access pattern and tile shape. A future session could profile the `hint_allow_tma` kernel with ncu and check for TMA-specific counters.
+  - **LOW**: `load_action()` in ncu_utils.py discards the report object, risking premature GC. Pre-existing bug from Session 4.
+- The validation artifacts in `profile/validation_run/` are gitignored and should not be committed.
 
 ## Eval Seeds
-- New regression test: `grep -rci 'B200\|b200\|sm_100\|sm100' --include='*.md' --include='*.py' --include='*.cu' --include='*.h' --exclude-dir=docs . | grep -v ':0$'` — must return empty.
-- New regression test: `grep -c 'Decode Optimization' reference/06-diagnosis-playbook.md` — must return >= 1.
-- New regression test: `grep -c 'Profiling BF16\|Profiling FP8\|Profiling INT8\|Profiling FP4' blackwell-cuda-programming.md` — must return >= 4.
-- Instruction update: G-4 showed consumer Blackwell supports clusters up to 8 (not matching data-center's 16). Future adaptations between data-center and consumer GPUs should not assume cluster limits match.
-- Instruction update: The harness_template.cu is a user template with stub code — it can't be compiled as-is. Validation required a separate working kernel. Future session plans should account for this.
+- New regression test: `grep -rci 'CUDA 13\.2' --include='*.md' --include='*.py' --include='*.cu' --include='*.h' --exclude-dir=docs . | grep -v ':0$'` — must return empty.
+- New regression test: `grep -c 'Tile Kernel\|tile kernel\|__tile_global__' blackwell-cuda-programming.md` — must return >= 3.
+- New regression test: `grep -c 'tile.*kernel\|Tile.*Kernel\|tile.*pattern\|Tile.*Pattern' reference/06-diagnosis-playbook.md` — must return >= 4.
+- New regression test: Compile `profile/validation_run/tile_vector_add.cu` with `nvcc -std=c++20 -arch=sm_120 --enable-tile -lineinfo -O3` — must succeed.
+- Instruction update: `--enable-tile` is required and NOT implied by `-std=c++20` or `-arch=sm_120`. This should be prominently documented in any tile kernel compilation guidance.
+- Instruction update: `cutile::hint` placement is context-sensitive: `occupancy` on function declaration, `latency`/`allow_tma` on statement. Getting this wrong produces a silent warning, not an error.
+- Instruction update: Tile kernel launch syntax accepts both `<<<grid>>>` and `<<<grid, 1>>>`. The single-arg form is preferred and matches NVIDIA samples.

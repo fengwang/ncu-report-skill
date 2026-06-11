@@ -5,7 +5,7 @@
 All guidance in this document targets the following development environment:
 
 - **GPU:** NVIDIA GeForce RTX 5090 (Compute Capability 12.0, monolithic GB202 die, 170 SMs)
-- **CUDA Toolkit:** 13.2
+- **CUDA Toolkit:** 13.3
 - **Compile target:** `sm_120a` (`-arch=sm_120a` or `-gencode arch=compute_120a,code=sm_120a`)
 
 Compilation example:
@@ -928,6 +928,138 @@ If a GEMM kernel's Tensor Core utilization is below 60%, there is almost certain
 |---|---|---|
 | Guideline 2 (non-coalesced) | Index-driven random access | Sort indices before access; use texture cache |
 | Guideline 7 (can't hide latency) | Next address depends on current load | Increase per-thread element count |
+
+---
+
+## Tile Kernel Programming Model (CUDA 13.3+)
+
+Tile Kernels are an alternative to traditional SIMT CUDA, introduced in CUDA 13.3. Code operates on entire tile blocks rather than individual threads — the compiler manages thread-level parallelism, shared memory staging, and warp scheduling. The C++ API lives in `<cuda_tile.h>` under the `cuda::tiles` namespace.
+
+### SIMT vs Tile Comparison
+
+| Aspect | SIMT (`__global__`) | Tile (`__tile_global__`) |
+|---|---|---|
+| Granularity | Individual threads | Entire blocks |
+| Indexing | `blockIdx` + `threadIdx` | `ct::bid()` only |
+| Parallelism | Programmer-managed warps | Compiler-managed |
+| Memory access | Per-element loads/stores | Tile-level operations (partition_view) |
+| Shared memory | Explicit `__shared__` declarations | Compiler auto-stages through shared memory |
+| Warp divergence | Programmer's concern | Not applicable |
+| Compilation | `nvcc -arch=sm_120` | `nvcc -std=c++20 -arch=sm_120 --enable-tile` |
+| Launch syntax | `kernel<<<grid, block>>>()` | `kernel<<<grid>>>()` (single chevron arg) |
+| Min architecture | sm_35+ | sm_80+ (sm_90+ for TMA) |
+
+### When to Use Tiles vs SIMT — Decision Framework
+
+| Factor | Use Tile Kernel | Use SIMT Kernel |
+|---|---|---|
+| **Warp-level control needed?** | No — compiler manages warps | Yes — custom warp shuffle, cooperative groups, warp-specialized patterns |
+| **Memory access pattern** | Regular, structured (partition_view-friendly) | Irregular, index-dependent, scatter/gather with computed offsets |
+| **Prototype speed** | Faster — less boilerplate, compiler handles details | Slower — manual shared memory, sync, tiling |
+| **Tensor core usage** | `ct::mma()` — single line | Manual mma.sync PTX or CUTLASS — complex but full control |
+| **Performance ceiling** | Compiler-limited — hints guide but don't guarantee | Programmer-controlled — higher ceiling for experts |
+| **Debugging** | Harder — compiler transforms obscure source mapping | Easier — direct correspondence between source and execution |
+
+**Rule of thumb:** Start with tile kernels for new work (requires sm_80+; sm_90+ for TMA). Fall back to SIMT when you need explicit warp-level control, custom memory access patterns, or maximum performance tuning beyond what hints provide.
+
+### RTX 5090 Tile Kernel Constraints (sm_120)
+
+- **Supported:** sm_120 fully supports tile kernels (validated on local hardware)
+- **TMA hardware present:** `device__attribute_tensor_map_access_supported = 1` on sm_120. Use `ct::assume_aligned(ptr, 16_ic)` + `partition_view` + `[[cutile::hint(0, allow_tma=true)]]` to enable TMA lowering. Note: hardware presence is confirmed; whether the compiler generates TMA instructions for a specific kernel depends on access pattern and tile shape — check for TMA-related ncu metrics to confirm.
+- **Shared memory:** The tile compiler auto-stages data through shared memory. The 100 KB/SM limit applies to compiler-managed staging, not programmer-controlled allocation.
+- **Hint architecture code:** `1200` is accepted for sm_120 (validated). Use `0` for architecture-independent hints.
+- **Compiler-chosen block size:** The tile compiler selects thread count per block (e.g., 128 for element-wise, 256 for GEMM). This is not programmer-controlled.
+- **GDDR7 bandwidth context:** RTX 5090's ~1.8 TB/s DRAM bandwidth (vs 8 TB/s on data-center Blackwell) makes memory-bound tile kernels especially sensitive to access efficiency. Partition_view + TMA-eligible access patterns are high-value optimizations on this GPU because they maximize effective bandwidth utilization under a tighter ceiling.
+
+### API Quick Reference
+
+**Declarations:**
+- `__tile_global__` — kernel entry point (replaces `__global__`)
+- `__tile__` — device helper (replaces `__device__`)
+- No cross-calling: `__tile_global__`/`__tile__` cannot call `__device__` functions and vice versa
+
+**Launch:** `kernel<<<grid>>>()` or `kernel<<<grid, 1>>>()` — no threads-per-block argument
+
+**Indexing:** `ct::bid()` returns `uint3` (`.x`, `.y`, `.z`); `ct::num_blocks()` returns `dim3`
+
+**Tile creation:**
+```cpp
+using f32x256 = ct::tile<float, ct::shape<256>>;
+auto z = ct::zeros<f32x256>();       // all zeros
+auto o = ct::ones<f32x256>();        // all ones
+auto f = ct::full<f32x256>(3.14f);   // fill with value
+auto s = ct::iota<ct::tile<int, ct::shape<256>>>();  // 0,1,2,...,255
+```
+
+**Memory — partition_view (structured, TMA-eligible):**
+```cpp
+auto span = ct::tensor_span{ptr, ct::extents{N}};
+auto view = ct::partition_view{span, ct::shape{256_ic}};
+auto tile = view.load_masked(ct::bid().x);   // boundary-safe load
+view.store_masked(result, ct::bid().x);       // boundary-safe store
+```
+
+**Memory — gather/scatter (irregular access):**
+```cpp
+auto offsets = 256 * ct::bid().x + ct::iota<ct::tile<int, ct::shape<256>>>();
+auto ptrs = ptr + offsets;
+auto tile = ct::load(ptrs);
+ct::store(out_ptrs, result);
+```
+
+**Primitives:**
+- `ct::mma(a_tile, b_tile, acc)` — matrix multiply-accumulate (uses tensor cores)
+- `ct::sum(tile, dim)`, `ct::max(tile, dim)`, `ct::min(tile, dim)` — reductions
+- `ct::atomic_add(ptr, value, memory_order, scope)` — atomic operations
+
+**Optimization hints:**
+```cpp
+// Latency hint — on a statement (assignment), not a declaration
+[[cutile::hint(0, latency=5)]]
+tile = view.load(idx);
+
+// Occupancy hint — on the function declaration
+[[cutile::hint(0, occupancy=4)]]
+__tile_global__ void my_kernel(...) { ... }
+
+// TMA hint — on a load/store statement
+[[cutile::hint(0, allow_tma=true)]]
+tile = view.load_masked(idx);
+```
+Architecture code: `0` = all architectures, `1200` = sm_120 specifically (validated).
+
+### Performance Annotations for Profiling
+
+| Annotation | What It Does | ncu Signal When Missing |
+|---|---|---|
+| `__restrict__` on pointers | Enables read/write interleaving; compiler can overlap loads and stores | Higher `long_scoreboard` stall ratio; load/store instructions serialized |
+| `ct::assume_aligned(ptr, 16_ic)` | Enables TMA lowering for partition_view loads | TMA metrics absent; loads use non-TMA path (higher `l1tex` wavefronts) |
+| `ct::irange(lb, ub)` for loops | Enables compiler loop pipelining and vectorization | Higher instruction count; no software pipelining visible in SASS |
+| `partition_view` over gather | Structured access enables TMA and compiler optimization | Higher `l1tex__t_sectors_pipe_lsu_mem_global_op_ld` (uncoalesced pattern) |
+| `ct::assume_divisible(n, 16_ic)` | Eliminates boundary checks; enables non-masked loads | Unnecessary boundary masking instructions; slightly higher instruction count |
+
+### Profiling Tile Kernels — How ncu Output Differs from SIMT
+
+Based on hardware validation on RTX 5090 (sm_120, CUDA 13.3, ncu 2026.2):
+
+**Occupancy:** The compiler chooses block size (thread count) automatically. `launch__block_size` shows the compiler's choice (e.g., 128 for element-wise, 256 for GEMM). `launch__occupancy_limit_warps` reflects the compiler-determined occupancy ceiling. You cannot tune block size directly — use the `occupancy` hint on the function declaration to guide the compiler.
+
+**Shared memory staging:** The tile compiler stages global memory access through shared memory automatically. `l1tex__data_pipe_lsu_wavefronts_mem_shared.sum` will be non-zero even if your code has no explicit shared memory. This is expected behavior, not a bug.
+
+**Stall signatures:** Stall metrics work with the naming pattern `smsp__average_warps_issue_stalled_<reason>_per_issue_active.ratio`. Validated stall reasons for tile kernels:
+- `long_scoreboard` — memory latency (dominant for memory-bound tile kernels, same as SIMT)
+- `barrier` — intra-block synchronization (appears in reductions with `ct::sum`)
+- `mio_throttle` — memory ordering (appears with atomics)
+- `math_pipe_throttle` — compute pipe saturation (appears in GEMM)
+- `sleeping` — warp sleeping/yielding (common in GEMM tile kernels)
+- `wait` — dependency waiting
+
+**Tensor core metrics:** `ct::mma()` maps to the same tensor core metrics as manual mma.sync:
+- `sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active` — tensor pipe utilization
+- `sm__inst_executed_pipe_tensor_subpipe_hmma.avg.pct_of_peak_sustained_active` — HMMA instruction throughput
+- `sm__ops_path_tensor_op_hmma_src_fp16_dst_fp32_sparsity_off.sum` — total tensor ops (should match M×N×K×2)
+
+**Warp divergence:** Eliminated by the compiler — no warp divergence stalls appear. `smsp__average_warps_issue_stalled_branch_resolving_per_issue_active.ratio` is near zero.
 
 ---
 
