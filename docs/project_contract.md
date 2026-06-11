@@ -1,7 +1,7 @@
 # Project Contract: ncu-report-skill RTX 5090 Adaptation
 
-**Version:** 1.0 (two-pass compiled)
-**Date:** 2026-06-04
+**Version:** 1.1 (amended for CUDA 13.3 / session 5)
+**Date:** 2026-06-11
 
 This contract was compiled in two passes: (1) drafted from the PRD, repository evidence, and hardware research; (2) adversarially reviewed to remove unsupported, ambiguous, over-specified, and untestable requirements. Only the revised contract is presented.
 
@@ -9,7 +9,7 @@ This contract was compiled in two passes: (1) drafted from the PRD, repository e
 
 ## 1. Scope
 
-Replace all NVIDIA B200 (sm_100, CC 10.0) targeting in the `ncu-report-skill` repository with NVIDIA GeForce RTX 5090 (sm_120, CC 12.0) targeting. Add LLM inference diagnosis content focused on single-user low-latency decode. Retain the general-purpose CUDA profiling capability.
+Replace all NVIDIA B200 (sm_100, CC 10.0) targeting in the `ncu-report-skill` repository with NVIDIA GeForce RTX 5090 (sm_120, CC 12.0) targeting. Add LLM inference diagnosis content focused on single-user low-latency decode. Retain the general-purpose CUDA profiling capability. Upgrade from CUDA 13.2 to CUDA 13.3 and add tile kernel (`__tile_global__`, `cuda::tiles`) programming model support.
 
 ## 2. Invariants
 
@@ -20,7 +20,7 @@ These conditions MUST hold at all times during and after the adaptation:
 | INV-1 | The skill directory layout (SKILL.md, blackwell-cuda-programming.md, helpers/, reference/) is preserved. No top-level files are added or removed without explicit justification. |
 | INV-2 | Helper scripts depend only on Python standard library + `ncu_report` module. No pip-installed packages. |
 | INV-3 | The six-dimension analysis framework (occupancy, tail effect, stalls, tensor core, timeline, memory) is preserved. Dimensions may be recalibrated but not removed. |
-| INV-4 | The harness template compiles and runs on the local RTX 5090 (CUDA 13.2, sm_120). |
+| INV-4 | The harness template compiles and runs on the local RTX 5090 (CUDA 13.3, sm_120). |
 | INV-5 | The diagnosis playbook pattern→cause→fix structure is preserved. Patterns may be recalibrated, added, or updated but the structure remains. |
 | INV-6 | Every hardware parameter referenced in any file matches RTX 5090 verified specs (see PRD §4.1). |
 
@@ -68,6 +68,8 @@ The project is complete when:
 2. At least 5 of 7 S-* requirements are implemented (deviations documented).
 3. The end-to-end workflow (harness → compile → collect → parse → diagnose → report) completes successfully on the local RTX 5090.
 4. No file in the repository (outside of docs/) references B200, sm_100, or B200-specific hardware values.
+5. CUDA version is 13.3 across all files (no 13.2 references outside docs/).
+6. Tile kernel programming model documented with profiling guidance and at least 4 diagnosis patterns.
 
 ## 5. Constraints
 
@@ -87,4 +89,4 @@ A session is done when:
 3. No regressions in files outside the session's `allowed_files` blast radius.
 4. The handoff requirements in the session contract are met.
 
-The project is done when all 4 sessions are complete and the project-level acceptance criteria (§4) pass.
+The project is done when all 5 sessions are complete and the project-level acceptance criteria (§4) pass.

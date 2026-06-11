@@ -1,0 +1,134 @@
+session_contract:
+  id: session-5
+  objective: >
+    Upgrade the skill from CUDA 13.2 to CUDA 13.3. Add comprehensive tile kernel
+    (__tile_global__, cuda::tiles) support across the programming guide, diagnosis
+    playbook, analysis dimensions, workflow, and common issues. Validate tile kernel
+    profiling on the local RTX 5090. Update project contract for CUDA 13.3 / 5 sessions.
+  risk_level: high
+  routing: worker_plus_reviewers
+  in_scope:
+    - CUDA 13.2 → 13.3 version bump across all non-docs files
+    - Tile kernel programming section in blackwell-cuda-programming.md (programming model, API surface, when-to-use decision framework, RTX 5090 constraints, performance guidelines)
+    - Tile kernel diagnosis patterns in playbook (occupancy, memory access via partition_view vs gather, MMA utilization, atomic contention, optimization hints tuning)
+    - Analysis dimensions update for tile kernels (occupancy model, stall signatures, tensor core via ct::mma, memory via partition_view/TMA)
+    - Performance annotation documentation (__restrict__, ct::assume_aligned, ct::irange, partition_view preference) with profiling implications
+    - Tile kernel harness variant in workflow (compilation with cuda_tile.h, ncu collection considerations)
+    - Tile kernel gotchas in common-issues (launch syntax second-chevron-must-be-1, cross-calling restriction, compile-time constant requirements)
+    - SKILL.md update to mention tile kernel support
+    - Hardware validation — compile and profile tile kernel on RTX 5090 (sm_120)
+    - Hardware validation — compare ncu metric output between SIMT and tile versions
+    - Hardware validation — validate TMA availability on sm_120 (allow_tma hint)
+    - Hardware validation — determine hint architecture code for sm_120 (expected 1200)
+    - Project contract amendment for CUDA 13.3 and session 5
+  out_of_scope:
+    - Python cuda.tile programming guide (skill focuses on C++ CUDA and ncu profiling)
+    - Rewriting existing SIMT content (tile kernels are additive)
+    - Tile kernel autotuning framework (optimization hints documented, not automated)
+    - Performance benchmarking of tile vs SIMT (the skill profiles, it does not benchmark)
+    - Publishing or releasing the skill
+    - Committing profile/validation_run/ artifacts to git
+  blast_radius:
+    allowed_files:
+      - SKILL.md
+      - blackwell-cuda-programming.md
+      - reference/01-workflow.md
+      - reference/05-analysis-dimensions.md
+      - reference/06-diagnosis-playbook.md
+      - reference/08-rtx5090-metric-names.md
+      - reference/09-common-issues.md
+      - README.md
+      - reference/04-python-api.md
+      - helpers/harness_template.cu
+      - docs/project_contract.md
+    forbidden_files:
+      - helpers/ncu_utils.py
+      - helpers/analyze_reports.py
+      - helpers/extract_stall_hotspots.py
+      - helpers/plot_timeline.py
+      - docs/session_1*
+      - docs/session_2*
+      - docs/session_3*
+      - docs/session_4*
+  invariants:
+    - Six-dimension analysis framework structure preserved (tile dimensions additive, not replacing SIMT)
+    - Diagnosis playbook pattern→cause→fix structure preserved
+    - Existing SIMT content unchanged (tile kernels are additive, not a replacement)
+    - Helper scripts still depend only on Python stdlib + ncu_report
+    - No new top-level files unless justified
+    - Harness template backward-compatible with SIMT kernels
+    - profile/validation_run/ is added to .gitignore, not committed
+  acceptance_criteria:
+    - "Zero references to CUDA 13.2 outside docs/ — grep -ri 'CUDA 13\\.2' --include='*.md' --include='*.py' --include='*.cu' --include='*.h' --exclude-dir=docs . returns empty"
+    - Tile kernel programming section exists in blackwell-cuda-programming.md with when-to-use decision framework covering at least 3 decision factors
+    - At least 4 tile-kernel-specific diagnosis patterns in playbook (occupancy, memory, MMA, atomics)
+    - Performance annotations section documents __restrict__, assume_aligned, irange, partition_view with concrete profiling signal connections
+    - Launch syntax constraint (second chevron must be 1) documented in common-issues
+    - Cross-calling restriction documented in common-issues
+    - Compile-time constant requirements (_ic literals) documented in common-issues
+    - Tile kernel compiles and runs on RTX 5090 (nvcc -arch=sm_120 with cuda_tile.h)
+    - ncu metrics validated for tile kernels — which metrics are meaningful documented in metric names reference
+    - TMA availability on sm_120 validated and documented
+    - SKILL.md mentions tile kernels as a supported programming model
+    - Hint architecture code for sm_120 determined and documented
+    - Project contract updated (version 1.1, CUDA 13.3, 5 sessions)
+  deterministic_checks:
+    - "grep -rci 'CUDA 13\\.2' --include='*.md' --include='*.py' --include='*.cu' --include='*.h' --exclude-dir=docs . | grep -v ':0$' # must be empty"
+    - "grep -c 'Tile Kernel\\|tile kernel\\|__tile_global__' blackwell-cuda-programming.md # must be >= 3"
+    - "grep -c 'tile.*kernel\\|Tile.*Kernel\\|tile.*pattern\\|Tile.*Pattern' reference/06-diagnosis-playbook.md # must be >= 4"
+    - "grep -c '__restrict__\\|assume_aligned\\|irange\\|partition_view' blackwell-cuda-programming.md # must be >= 4"
+    - "grep -c 'tile\\|Tile\\|__tile_global__' reference/09-common-issues.md # must be >= 2"
+    - "grep -c 'tile\\|Tile' SKILL.md # must be >= 1"
+    - "grep -c 'atomic.*contention\\|atomic.*tile\\|tile.*atomic' reference/06-diagnosis-playbook.md # must be >= 1"
+    - "grep -c '13\\.3' docs/project_contract.md # must be >= 1"
+    - "grep -c 'all 5 sessions' docs/project_contract.md # must be >= 1"
+  review_axes:
+    - correctness
+    - security
+    - architecture
+    - performance
+  adversarial_cases:
+    - Tile kernel content is copy-pasted from NVIDIA docs without RTX 5090 contextualization (sm_120 specifics, GDDR7 implications)
+    - Diagnosis patterns are hypothetical — not validated against actual ncu output from tile kernel profiling on real hardware
+    - Performance annotations documented but not connected to specific ncu metrics that would show the difference
+    - Decision framework is too simplistic — just says "use tiles for simple kernels" without concrete criteria
+    - Atomic contention patterns are generic CUDA atomics advice, not tile-kernel-specific
+    - Hint architecture code assumed to be 1200 without compiler verification — code may be different or unsupported
+    - TMA validation passes on a trivial kernel that doesn't actually trigger the TMA path (misses partition_view + assume_aligned requirement)
+    - Existing SIMT content silently broken by CUDA 13.2→13.3 version bump
+    - Metric validation uses a trivial element-wise kernel that doesn't exercise mma, atomics, or multi-dimensional tile paths
+    - Programming guide section is comprehensive but not actionable — reader can't translate to profiling workflow
+    - Version bump leaves stale version in a file not covered by grep pattern (e.g., embedded in a code comment or string)
+  failure_modes_to_watch:
+    - cuda_tile.h not available in local CUDA 13.3 installation (packaging or path issue)
+    - nvcc rejects __tile_global__ on sm_120 (compiler version too old or feature gate)
+    - ncu produces no useful metrics for tile kernels (all zeros, N/A, or missing sections)
+    - TMA not available on consumer RTX 5090 despite sm_120 >= sm_90 (possible data-center vs consumer distinction)
+    - Tile kernel compiles but crashes at runtime (driver version mismatch)
+    - Optimization hints with architecture code 1200 rejected by compiler (wrong encoding)
+    - CUDA 13.2→13.3 version bump breaks an existing path reference or nvcc flag
+    - PM sampling section not available for tile kernels (different execution model)
+    - Warp-level metrics meaningless for tile kernels (compiler manages warps, reported values misleading)
+  done_condition: >
+    All acceptance criteria pass. All deterministic checks pass. Tile kernel
+    programming guide section complete with RTX 5090-specific content, decision
+    framework, and performance annotation guide. Diagnosis playbook has at least
+    4 tile-kernel patterns with concrete ncu metric references. Common issues
+    updated with tile kernel gotchas. SKILL.md mentions tile kernels. ncu metrics
+    validated on real RTX 5090 hardware. Project contract updated for CUDA 13.3
+    and 5 sessions. Zero CUDA 13.2 references outside docs/.
+  handoff_requirements:
+    - Tile kernel content is additive — all existing SIMT content remains valid and unchanged
+    - Any unverified metrics, hints, or hardware behaviors are clearly flagged with caveats
+    - Hardware validation artifacts in profile/validation_run/ (gitignored, not committed)
+    - Remaining tile kernel limitations documented in reference/09-common-issues.md
+    - The skill is ready for use on RTX 5090 with both SIMT and tile kernel workloads
+  eval_seed_candidates:
+    - Compile and run a tile kernel harness on RTX 5090 with cuda_tile.h
+    - Profile a tile GEMM kernel with ncu and verify ct::mma-related metrics appear
+    - grep for CUDA 13.2 across repo (excluding docs/) — must return empty
+    - Verify decision framework covers at least 3 concrete decision factors
+    - Check that diagnosis patterns have specific ncu metric references (not generic advice)
+    - Verify performance annotations are connected to specific profiling signals
+    - Profile same kernel as both SIMT (__global__) and tile (__tile_global__) and compare metric output
+    - Test cutile::hint(1200, occupancy=4) compiles on sm_120
